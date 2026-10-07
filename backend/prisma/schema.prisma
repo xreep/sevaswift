@@ -1,0 +1,217 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  CUSTOMER
+  TECHNICIAN
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum VerificationStatus {
+  UNSUBMITTED
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum JobPriority {
+  NORMAL
+  URGENT
+}
+
+enum JobStatus {
+  CREATED
+  MATCHED
+  ACCEPTED
+  EN_ROUTE
+  ARRIVED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  EXPIRED
+}
+
+model User {
+  id            String   @id @default(uuid())
+  name          String
+  email         String   @unique
+  phone         String?
+  passwordHash  String
+  role          Role     @default(CUSTOMER)
+  status        UserStatus @default(ACTIVE)
+  emailVerified Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  technicianProfile TechnicianProfile?
+  customerJobs      JobRequest[]      @relation("CustomerJobs")
+  technicianJobs    JobRequest[]      @relation("TechnicianJobs")
+  reviews           Review[]
+  refreshTokens     RefreshToken[]
+
+  @@index([email])
+  @@index([role])
+}
+
+model TechnicianProfile {
+  id                String   @id @default(uuid())
+  userId            String   @unique
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  verificationStatus VerificationStatus @default(UNSUBMITTED)
+  documentKey       String?
+  documentType      String?
+  rejectionReason   String?
+  ratingAvg         Float    @default(0)
+  ratingCount       Int      @default(0)
+  completedJobs     Int      @default(0)
+  isOnline          Boolean  @default(false)
+  lastLocation      String?  // "lat,lng" for Redis GEO fallback
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  skills        TechnicianSkill[]
+  serviceAreas  ServiceArea[]
+  jobOffers     JobOffer[]
+
+  @@index([verificationStatus])
+  @@index([isOnline])
+}
+
+model TechnicianSkill {
+  id           String @id @default(uuid())
+  technicianId String
+  technician   TechnicianProfile @relation(fields: [technicianId], references: [id], onDelete: Cascade)
+  serviceId    String
+  service      Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now())
+
+  @@unique([technicianId, serviceId])
+  @@index([serviceId])
+}
+
+model ServiceArea {
+  id           String @id @default(uuid())
+  technicianId String
+  technician   TechnicianProfile @relation(fields: [technicianId], references: [id], onDelete: Cascade)
+  centerLat    Float
+  centerLng    Float
+  radiusKm     Float
+  polygon      Unsupported("geometry(Polygon)")? // PostGIS geometry
+  createdAt    DateTime @default(now())
+
+  @@index([technicianId])
+}
+
+model Service {
+  id          String   @id @default(uuid())
+  name        String
+  category    String
+  baseFee     Int      // in paise
+  icon        String?
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  skills      TechnicianSkill[]
+  jobs        JobRequest[]
+
+  @@index([category])
+  @@index([isActive])
+}
+
+model JobRequest {
+  id              String     @id @default(uuid())
+  customerId      String
+  customer        User       @relation("CustomerJobs", fields: [customerId], references: [id], onDelete: Cascade)
+  technicianId    String?
+  technician      User?      @relation("TechnicianJobs", fields: [technicianId], references: [id], onDelete: SetNull)
+  serviceId       String
+  service         Service    @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  lat             Float
+  lng             Float
+  address         String
+  description     String?
+  photoKeys       String[]
+  priority        JobPriority @default(NORMAL)
+  status          JobStatus  @default(CREATED)
+  responseTimeSecs Int?
+  createdAt       DateTime   @default(now())
+  acceptedAt      DateTime?
+  completedAt     DateTime?
+
+  statusHistory   JobStatusHistory[]
+  offers          JobOffer[]
+  review          Review?
+
+  @@index([customerId])
+  @@index([technicianId])
+  @@index([status])
+  @@index([serviceId])
+  @@index([createdAt])
+}
+
+model JobStatusHistory {
+  id        String   @id @default(uuid())
+  jobId     String
+  job       JobRequest @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  fromStatus JobStatus?
+  toStatus   JobStatus
+  at        DateTime @default(now())
+
+  @@index([jobId])
+}
+
+model JobOffer {
+  id           String   @id @default(uuid())
+  jobId        String
+  job          JobRequest @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  technicianId String
+  technician   TechnicianProfile @relation(fields: [technicianId], references: [id], onDelete: Cascade)
+  offeredAt    DateTime @default(now())
+  expiresAt    DateTime
+  response     String?  // ACCEPTED, REJECTED, EXPIRED
+
+  @@index([jobId])
+  @@index([technicianId])
+  @@index([expiresAt])
+}
+
+model Review {
+  id        String   @id @default(uuid())
+  jobId     String   @unique
+  job       JobRequest @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  customerId String
+  customer  User     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  rating    Int      // 1-5
+  comment   String?
+  createdAt DateTime @default(now())
+
+  @@index([customerId])
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  revokedAt DateTime?
+  replacedByTokenHash String?
+
+  @@index([userId])
+  @@index([expiresAt])
+}
