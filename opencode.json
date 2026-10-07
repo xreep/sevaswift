@@ -1,0 +1,9 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "REPLACE_WITH_EXACT_NEMOTRON_3.5_LIGHTNING_ID",
+  "small_model": "REPLACE_WITH_EXACT_NEMOTRON_3.5_LIGHTNING_ID",
+  "instructions": [
+    "docs/superpowers/specs/2026-10-07-dispatch-design.md",
+    "docs/superpowers/plans/2026-10-07-phase-1-foundation.md"
+  ]
+}
