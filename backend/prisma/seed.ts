@@ -104,7 +104,7 @@ async function main() {
 
   console.log('Created demo accounts');
 
-  await prisma.technicianProfile.upsert({
+  const techProfile = await prisma.technicianProfile.upsert({
     where: { userId: technician.id },
     update: {},
     create: {
@@ -118,31 +118,33 @@ async function main() {
     },
   });
 
+  console.log('Created technician profile:', techProfile.id);
+
   const plumbingService = await prisma.service.findUnique({ where: { id: 'plumbing' } });
   const electricalService = await prisma.service.findUnique({ where: { id: 'electrical' } });
   const acService = await prisma.service.findUnique({ where: { id: 'ac_repair' } });
 
   if (plumbingService) {
     await prisma.technicianSkill.upsert({
-      where: { technicianId_serviceId: { technicianId: technician.id, serviceId: plumbingService.id } },
+      where: { technicianId_serviceId: { technicianId: techProfile.id, serviceId: plumbingService.id } },
       update: {},
-      create: { technicianId: technician.id, serviceId: plumbingService.id },
+      create: { technicianId: techProfile.id, serviceId: plumbingService.id },
     });
   }
 
   if (electricalService) {
     await prisma.technicianSkill.upsert({
-      where: { technicianId_serviceId: { technicianId: technician.id, serviceId: electricalService.id } },
+      where: { technicianId_serviceId: { technicianId: techProfile.id, serviceId: electricalService.id } },
       update: {},
-      create: { technicianId: technician.id, serviceId: electricalService.id },
+      create: { technicianId: techProfile.id, serviceId: electricalService.id },
     });
   }
 
   if (acService) {
     await prisma.technicianSkill.upsert({
-      where: { technicianId_serviceId: { technicianId: technician.id, serviceId: acService.id } },
+      where: { technicianId_serviceId: { technicianId: techProfile.id, serviceId: acService.id } },
       update: {},
-      create: { technicianId: technician.id, serviceId: acService.id },
+      create: { technicianId: techProfile.id, serviceId: acService.id },
     });
   }
 
@@ -151,7 +153,7 @@ async function main() {
     update: {},
     create: {
       id: 'tech-area-1',
-      technicianId: technician.id,
+      technicianId: techProfile.id,
       centerLat: 28.6139,
       centerLng: 77.2090,
       radiusKm: 15,
@@ -182,7 +184,7 @@ async function main() {
         },
       });
 
-      await prisma.technicianProfile.create({
+      const techProfile = await prisma.technicianProfile.create({
         data: {
           userId: techUser.id,
           verificationStatus: VerificationStatus.VERIFIED,
@@ -199,7 +201,7 @@ async function main() {
       for (let j = 0; j < numSkills; j++) {
         await prisma.technicianSkill.create({
           data: {
-            technicianId: techUser.id,
+            technicianId: techProfile.id,
             serviceId: shuffledServices[j].id,
           },
         });
@@ -207,7 +209,7 @@ async function main() {
 
       await prisma.serviceArea.create({
         data: {
-          technicianId: techUser.id,
+          technicianId: techProfile.id,
           centerLat: city.lat + (Math.random() - 0.5) * 0.1,
           centerLng: city.lng + (Math.random() - 0.5) * 0.1,
           radiusKm: 10 + Math.floor(Math.random() * 10),

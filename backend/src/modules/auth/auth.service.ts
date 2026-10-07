@@ -2,10 +2,10 @@ import { PrismaClient, Role, UserStatus, Prisma } from '@prisma/client';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
-import { config } from '../../config/index.js';
-import { getClock } from '../../common/utils/clock.js';
-import { AppError, badRequest, conflict, unauthorized, notFound } from '../../common/errors/index.js';
-import type { RegisterInput, LoginInput, VerifyEmailInput, ForgotPasswordInput, ResetPasswordInput } from './auth.dto.js';
+import { config } from '../../config/index';
+import { getClock } from '../../common/utils/clock';
+import { AppError, badRequest, conflict, unauthorized, notFound } from '../../common/errors/index';
+import type { RegisterInput, LoginInput, VerifyEmailInput, ForgotPasswordInput, ResetPasswordInput } from './auth.dto';
 
 const prisma = new PrismaClient();
 
@@ -60,6 +60,10 @@ export async function register(
 
   if (existingUser) {
     throw conflict('EMAIL_EXISTS', 'Email already registered');
+  }
+
+  if (input.role === 'ADMIN') {
+    throw badRequest('INVALID_ROLE', 'Admin registration not allowed');
   }
 
   const passwordHash = await bcrypt.hash(input.password, 10);

@@ -4,11 +4,11 @@ import cors from 'cors';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import rateLimit from 'express-rate-limit';
-import { errorHandler } from './common/middleware/errorHandler.js';
-import { notFoundHandler } from './common/middleware/notFoundHandler.js';
-import { config } from './config/index.js';
-import authRoutes from './modules/auth/auth.routes.js';
-import catalogRoutes from './modules/catalog/catalog.routes.js';
+import { errorHandler } from './common/middleware/errorHandler';
+import { notFoundHandler } from './common/middleware/notFoundHandler';
+import { config } from './config/index';
+import authRoutes from './modules/auth/auth.routes';
+import catalogRoutes from './modules/catalog/catalog.routes';
 
 const app = express();
 

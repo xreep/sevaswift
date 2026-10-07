@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { config } from '../../config/index.js';
-import { unauthorized } from '../errors/index.js';
+import { config } from '../../config/index';
+import { unauthorized } from '../errors/index';
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();

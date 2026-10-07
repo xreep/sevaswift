@@ -1,5 +1,5 @@
 import { PrismaClient, Prisma } from '@prisma/client';
-import { AppError, notFound } from '../../common/errors/index.js';
+import { AppError, notFound } from '../../common/errors/index';
 
 const prisma = new PrismaClient();
 

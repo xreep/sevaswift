@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
-import * as catalogService from './catalog.service.js';
-import { AppError } from '../../common/errors/index.js';
+import * as catalogService from './catalog.service';
+import { AppError } from '../../common/errors/index';
 
 export async function listServices(_req: Request, res: Response, next: NextFunction): Promise<void> {
   try {

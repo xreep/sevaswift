@@ -1,8 +1,8 @@
 import { Router } from 'express';
-import { validate } from '../../common/middleware/validate.js';
-import { authMiddleware, requireRole } from '../../common/middleware/auth.js';
-import * as catalogController from './catalog.controller.js';
-import * as catalogDto from './catalog.dto.js';
+import { validate } from '../../common/middleware/validate';
+import { authMiddleware, requireRole } from '../../common/middleware/auth';
+import * as catalogController from './catalog.controller';
+import * as catalogDto from './catalog.dto';
 
 const router = Router();
 

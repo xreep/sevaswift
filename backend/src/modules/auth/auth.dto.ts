@@ -6,7 +6,7 @@ export const registerSchema = z.object({
     email: z.string().email().toLowerCase().trim(),
     phone: z.string().regex(/^\+?[1-9]\d{1,14}$/).optional(),
     password: z.string().min(8).max(128),
-    role: z.enum(['CUSTOMER', 'TECHNICIAN']),
+    role: z.enum(['CUSTOMER', 'TECHNICIAN', 'ADMIN']),
   }),
 });
 

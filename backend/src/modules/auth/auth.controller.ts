@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
-import { AuthRequest } from '../../common/middleware/auth.js';
-import * as authService from './auth.service.js';
-import { AppError } from '../../common/errors/index.js';
+import { AuthRequest } from '../../common/middleware/auth';
+import * as authService from './auth.service';
+import { AppError } from '../../common/errors/index';
 
 export async function register(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {

@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
-import { AppError } from '../errors/index.js';
-import { config } from '../../config/index.js';
+import { AppError } from '../errors/index';
+import { config } from '../../config/index';
 import { ZodError } from 'zod';
 import { Prisma } from '@prisma/client';
 

@@ -108,7 +108,6 @@ model ServiceArea {
   centerLat    Float
   centerLng    Float
   radiusKm     Float
-  polygon      Unsupported("geometry(Polygon)")? // PostGIS geometry
   createdAt    DateTime @default(now())
 
   @@index([technicianId])

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { BrowserRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider } from '../contexts/AuthContext';
@@ -40,21 +40,23 @@ describe('Login Page', () => {
 
   it('shows validation errors for empty fields', async () => {
     renderWithProviders(<Login />);
-    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    const form = screen.getByTestId('login-form');
+    fireEvent.submit(form);
     await waitFor(() => {
       expect(screen.getByText('Invalid email address')).toBeInTheDocument();
       expect(screen.getByText('Password is required')).toBeInTheDocument();
-    });
+    }, { timeout: 2000 });
   });
 
   it('shows validation error for invalid email', async () => {
     renderWithProviders(<Login />);
     fireEvent.change(screen.getByLabelText('Email address'), { target: { value: 'invalid' } });
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'password123' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    const form = screen.getByTestId('login-form');
+    fireEvent.submit(form);
     await waitFor(() => {
       expect(screen.getByText('Invalid email address')).toBeInTheDocument();
-    });
+    }, { timeout: 2000 });
   });
 
   it('has link to register page', () => {

@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { AnyZodObject, ZodError } from 'zod';
-import { AppError } from '../errors/index.js';
+import { AppError } from '../errors/index';
 
 export function validate(schema: AnyZodObject) {
   return async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
@@ -9,6 +9,7 @@ export function validate(schema: AnyZodObject) {
         body: req.body,
         query: req.query,
         params: req.params,
+        cookies: req.cookies,
       });
       next();
     } catch (err) {

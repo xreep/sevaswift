@@ -12,7 +12,7 @@ const config: Config = {
     '!src/index.ts',
   ],
   coverageDirectory: 'coverage',
-  setupFilesAfterEnv: ['<rootDir>/jest.setup.ts'],
+  setupFilesAfterEnv: ['<rootDir>/src/jest.setup.ts'],
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
   },
@@ -20,6 +20,9 @@ const config: Config = {
     '^.+\\.ts$': ['ts-jest', {
       tsconfig: 'tsconfig.json',
       useESM: false,
+      diagnostics: {
+        ignoreCodes: [151002],
+      },
     }],
   },
 };
