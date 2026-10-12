@@ -1,4 +1,4 @@
-import { PrismaClient, Role, UserStatus, VerificationStatus, JobPriority, JobStatus } from '@prisma/client';
+import { PrismaClient, Role, UserStatus, VerificationStatus } from '@prisma/client';
 import bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
@@ -169,13 +169,28 @@ async function main() {
     { name: 'Hyderabad', lat: 17.3850, lng: 78.4867 },
   ];
 
-  const allServices = await prisma.service.findMany();
+  const allServices = await prisma.service.findMany({ orderBy: { id: 'asc' } });
+
+  // Deterministic PRNG so every seed run produces the same demo technicians.
+  let state = 42;
+  const random = () => {
+    state = (state + 0x6d2b79f5) | 0;
+    let t = Math.imul(state ^ (state >>> 15), 1 | state);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 
   for (const city of cities) {
     for (let i = 0; i < 5; i++) {
-      const techUser = await prisma.user.create({
-        data: {
-          email: `tech_${city.name.toLowerCase()}_${i}@demo.sevaswift`,
+      const handle = `tech_${city.name.toLowerCase()}_${i}`;
+      const lat = city.lat + (random() - 0.5) * 0.1;
+      const lng = city.lng + (random() - 0.5) * 0.1;
+
+      const techUser = await prisma.user.upsert({
+        where: { email: `${handle}@demo.sevaswift` },
+        update: {},
+        create: {
+          email: `${handle}@demo.sevaswift`,
           name: `Tech ${city.name} ${i + 1}`,
           passwordHash,
           role: Role.TECHNICIAN,
@@ -184,35 +199,40 @@ async function main() {
         },
       });
 
-      const techProfile = await prisma.technicianProfile.create({
-        data: {
+      const profile = await prisma.technicianProfile.upsert({
+        where: { userId: techUser.id },
+        update: {},
+        create: {
           userId: techUser.id,
           verificationStatus: VerificationStatus.VERIFIED,
-          ratingAvg: 4.0 + Math.random() * 1.0,
-          ratingCount: Math.floor(Math.random() * 50),
-          completedJobs: Math.floor(Math.random() * 100),
-          isOnline: Math.random() > 0.3,
-          lastLocation: `${city.lat + (Math.random() - 0.5) * 0.1},${city.lng + (Math.random() - 0.5) * 0.1}`,
+          ratingAvg: Math.round((4.0 + random()) * 10) / 10,
+          ratingCount: Math.floor(random() * 50),
+          completedJobs: Math.floor(random() * 100),
+          isOnline: random() > 0.3,
+          lastLocation: `${lat.toFixed(6)},${lng.toFixed(6)}`,
         },
       });
 
-      const numSkills = 1 + Math.floor(Math.random() * 3);
-      const shuffledServices = [...allServices].sort(() => Math.random() - 0.5);
+      const numSkills = 1 + Math.floor(random() * 3);
+      const offset = Math.floor(random() * allServices.length);
       for (let j = 0; j < numSkills; j++) {
-        await prisma.technicianSkill.create({
-          data: {
-            technicianId: techProfile.id,
-            serviceId: shuffledServices[j].id,
-          },
+        const service = allServices[(offset + j) % allServices.length];
+        await prisma.technicianSkill.upsert({
+          where: { technicianId_serviceId: { technicianId: profile.id, serviceId: service.id } },
+          update: {},
+          create: { technicianId: profile.id, serviceId: service.id },
         });
       }
 
-      await prisma.serviceArea.create({
-        data: {
-          technicianId: techProfile.id,
-          centerLat: city.lat + (Math.random() - 0.5) * 0.1,
-          centerLng: city.lng + (Math.random() - 0.5) * 0.1,
-          radiusKm: 10 + Math.floor(Math.random() * 10),
+      await prisma.serviceArea.upsert({
+        where: { id: `area-${handle}` },
+        update: {},
+        create: {
+          id: `area-${handle}`,
+          technicianId: profile.id,
+          centerLat: lat,
+          centerLng: lng,
+          radiusKm: 10 + Math.floor(random() * 10),
         },
       });
     }

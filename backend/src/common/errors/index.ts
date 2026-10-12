@@ -28,7 +28,11 @@ export class AppError extends Error {
   }
 }
 
-export function badRequest(code: string, message: string, fieldErrors?: Record<string, string[]>): AppError {
+export function badRequest(
+  code: string,
+  message: string,
+  fieldErrors?: Record<string, string[]>
+): AppError {
   return new AppError(400, code, message, fieldErrors);
 }
 
