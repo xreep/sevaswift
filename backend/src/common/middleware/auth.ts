@@ -21,12 +21,10 @@ function readAccessToken(req: Request): string | undefined {
   return undefined;
 }
 
-export async function authMiddleware(
-  req: AuthRequest,
-  _res: Response,
-  next: NextFunction
-): Promise<void> {
-  const accessToken = readAccessToken(req);
+export type AuthUser = NonNullable<AuthRequest['user']>;
+
+/** Verifies an access token and loads its active user. Shared by HTTP and Socket.IO auth. */
+export async function authenticateAccessToken(accessToken: string | undefined): Promise<AuthUser> {
   if (!accessToken) {
     throw unauthorized('MISSING_TOKEN', 'Access token required');
   }
@@ -50,7 +48,15 @@ export async function authMiddleware(
     throw unauthorized('USER_NOT_FOUND', 'User not found or inactive');
   }
 
-  req.user = { id: user.id, email: user.email, role: user.role };
+  return { id: user.id, email: user.email, role: user.role };
+}
+
+export async function authMiddleware(
+  req: AuthRequest,
+  _res: Response,
+  next: NextFunction
+): Promise<void> {
+  req.user = await authenticateAccessToken(readAccessToken(req));
   next();
 }
 

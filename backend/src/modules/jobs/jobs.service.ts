@@ -10,8 +10,9 @@ import {
   publishStatusChange,
   transitionJob,
 } from './lifecycle';
+import type { LatLng } from '../../common/geo/index';
 import type { Viewer } from './jobs.mapper';
-import { jobInclude, toJobDto } from './jobs.mapper';
+import { jobInclude, liveEta, toJobDto } from './jobs.mapper';
 import type {
   CancelJobInput,
   CreateJobInput,
@@ -53,6 +54,24 @@ export async function getJob(jobId: string, viewer: Viewer) {
     throw notFound('JOB_NOT_FOUND', 'Job not found');
   }
   return toJobDto(job, viewer);
+}
+
+/** Whether the viewer may follow this job's live updates. */
+export async function canViewJob(jobId: string, viewer: Viewer): Promise<boolean> {
+  const job = await prisma.jobRequest.findUnique({
+    where: { id: jobId },
+    select: { customerId: true, technicianId: true },
+  });
+  return !!job && canView(jobId, job, viewer);
+}
+
+/** The technician's in-progress jobs, with a live ETA from the given position. */
+export async function activeJobsWithEta(technicianUserId: string, position: LatLng) {
+  const jobs = await prisma.jobRequest.findMany({
+    where: { technicianId: technicianUserId, status: { in: ACTIVE_JOB_STATUSES } },
+    select: { id: true, status: true, lat: true, lng: true },
+  });
+  return jobs.map(job => ({ jobId: job.id, eta: liveEta(job.status, position, job) }));
 }
 
 export async function createJob(customerId: string, input: CreateJobInput) {

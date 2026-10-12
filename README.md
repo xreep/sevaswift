@@ -87,6 +87,21 @@ All endpoints under `/api/v1`:
 - `POST /api/v1/jobs/:id/cancel` — Cancel before the technician arrives (customer or admin)
 - `POST /api/v1/jobs/:id/review` — Rate a completed job, once (customer)
 
+### Real-time (Socket.IO, same origin as the API)
+Connect with `io(API_URL, { auth: { token: accessToken } })`; a missing or invalid token fails with
+`connect_error` whose message is the error code (`MISSING_TOKEN`, `TOKEN_EXPIRED`, …).
+
+| Event (server → client) | Sent to | Payload |
+|---|---|---|
+| `offer:new` | the offered technician | `{ jobId, offerId, expiresAt }` |
+| `offer:closed` | that technician | `{ jobId, offerId, reason }` (`ACCEPTED`, `REJECTED`, `EXPIRED`, `CANCELLED`) |
+| `job:status` | customer, assigned technician, admins, `job:{id}` subscribers | `{ jobId, from, to, at }` |
+| `job:location` | `job:{id}` subscribers | `{ jobId, lat, lng, at, eta: { distanceKm, minutes } \| null }` |
+| `technician:location` | admins | `{ technicianId, lat, lng, at }` |
+
+Client → server: `job:subscribe` `{ jobId }` with an ack (`{ ok: true }` or `{ ok: false, code }`; only
+users who can view the job may subscribe) and `job:unsubscribe` `{ jobId }`.
+
 ## How auto-dispatch works
 
 1. A customer raises a request with a service, location and priority.

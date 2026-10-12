@@ -1,6 +1,6 @@
-import type { Prisma, Role } from '@prisma/client';
+import type { JobStatus, Prisma, Role } from '@prisma/client';
 import { config } from '../../config/index';
-import { estimateMinutes, haversineKm } from '../../common/geo/index';
+import { estimateMinutes, haversineKm, type LatLng } from '../../common/geo/index';
 
 export const jobInclude = {
   service: { select: { id: true, name: true, category: true, icon: true, baseFee: true } },
@@ -38,7 +38,19 @@ export interface Viewer {
 }
 
 /** Live ETA is only meaningful while the technician is on the way. */
-const TRACKED_STATUSES = new Set(['ACCEPTED', 'EN_ROUTE']);
+const TRACKED_STATUSES = new Set<JobStatus>(['ACCEPTED', 'EN_ROUTE']);
+
+export type LiveEta = { distanceKm: number; minutes: number } | null;
+
+/** Straight-line ETA from the technician to the job, or null once they are no longer travelling. */
+export function liveEta(status: JobStatus, techLocation: LatLng, jobLocation: LatLng): LiveEta {
+  if (!TRACKED_STATUSES.has(status)) return null;
+  const distanceKm = haversineKm(techLocation, jobLocation);
+  return {
+    distanceKm: Math.round(distanceKm * 10) / 10,
+    minutes: estimateMinutes(distanceKm, config.dispatch.averageSpeedKmph),
+  };
+}
 
 export function toJobDto(job: JobWithRelations, viewer: Viewer) {
   const profile = job.technician?.technicianProfile;
@@ -47,14 +59,7 @@ export function toJobDto(job: JobWithRelations, viewer: Viewer) {
       ? { lat: profile.lastLat, lng: profile.lastLng, updatedAt: profile.locationUpdatedAt }
       : null;
 
-  let eta: { distanceKm: number; minutes: number } | null = null;
-  if (techLocation && TRACKED_STATUSES.has(job.status)) {
-    const distanceKm = haversineKm(techLocation, job);
-    eta = {
-      distanceKm: Math.round(distanceKm * 10) / 10,
-      minutes: estimateMinutes(distanceKm, config.dispatch.averageSpeedKmph),
-    };
-  }
+  const eta = techLocation ? liveEta(job.status, techLocation, job) : null;
 
   const isAdmin = viewer.role === 'ADMIN';
   const isAssignedTech = job.technicianId === viewer.id;
