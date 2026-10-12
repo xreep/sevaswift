@@ -106,7 +106,7 @@ async function main() {
 
   const techProfile = await prisma.technicianProfile.upsert({
     where: { userId: technician.id },
-    update: {},
+    update: { lastLat: 28.6139, lastLng: 77.209, locationUpdatedAt: new Date() },
     create: {
       userId: technician.id,
       verificationStatus: VerificationStatus.VERIFIED,
@@ -114,7 +114,9 @@ async function main() {
       ratingCount: 12,
       completedJobs: 47,
       isOnline: true,
-      lastLocation: '28.6139,77.2090',
+      lastLat: 28.6139,
+      lastLng: 77.209,
+      locationUpdatedAt: new Date(),
     },
   });
 
@@ -148,19 +150,7 @@ async function main() {
     });
   }
 
-  await prisma.serviceArea.upsert({
-    where: { id: 'tech-area-1' },
-    update: {},
-    create: {
-      id: 'tech-area-1',
-      technicianId: techProfile.id,
-      centerLat: 28.6139,
-      centerLng: 77.2090,
-      radiusKm: 15,
-    },
-  });
-
-  console.log('Created technician profile with skills and service area');
+  console.log('Created demo technician skills');
 
   const cities = [
     { name: 'Delhi', lat: 28.6139, lng: 77.2090 },
@@ -201,7 +191,8 @@ async function main() {
 
       const profile = await prisma.technicianProfile.upsert({
         where: { userId: techUser.id },
-        update: {},
+        // Keep demo positions current on re-seed (locations drift as technicians move).
+        update: { lastLat: Number(lat.toFixed(6)), lastLng: Number(lng.toFixed(6)), locationUpdatedAt: new Date() },
         create: {
           userId: techUser.id,
           verificationStatus: VerificationStatus.VERIFIED,
@@ -209,7 +200,9 @@ async function main() {
           ratingCount: Math.floor(random() * 50),
           completedJobs: Math.floor(random() * 100),
           isOnline: random() > 0.3,
-          lastLocation: `${lat.toFixed(6)},${lng.toFixed(6)}`,
+          lastLat: Number(lat.toFixed(6)),
+          lastLng: Number(lng.toFixed(6)),
+          locationUpdatedAt: new Date(),
         },
       });
 
@@ -223,18 +216,6 @@ async function main() {
           create: { technicianId: profile.id, serviceId: service.id },
         });
       }
-
-      await prisma.serviceArea.upsert({
-        where: { id: `area-${handle}` },
-        update: {},
-        create: {
-          id: `area-${handle}`,
-          technicianId: profile.id,
-          centerLat: lat,
-          centerLng: lng,
-          radiusKm: 10 + Math.floor(random() * 10),
-        },
-      });
     }
   }
 

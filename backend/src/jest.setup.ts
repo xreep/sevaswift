@@ -17,4 +17,4 @@ process.env.JWT_REFRESH_SECRET = 'test-refresh-secret-key-for-testing-only-32cha
 process.env.NODE_ENV = 'test';
 process.env.PORT = '4000';
 process.env.CORS_ORIGIN = 'http://localhost:5173';
-process.env.UPLOAD_DIR = './uploads';
+process.env.ORS_API_KEY = '';

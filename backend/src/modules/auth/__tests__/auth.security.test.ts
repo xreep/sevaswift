@@ -84,7 +84,7 @@ describe('registration', () => {
     const profile = await prisma.technicianProfile.findUnique({
       where: { userId: res.body.user.id },
     });
-    expect(profile?.verificationStatus).toBe('UNSUBMITTED');
+    expect(profile?.verificationStatus).toBe('PENDING');
   });
 });
 

@@ -19,7 +19,7 @@ SevaSwift is an on-demand emergency home-services platform (plumbing, electrical
 | Live locations | Technician position stored on `TechnicianProfile` and broadcast over Socket.IO, updated every ~10s while online |
 | Real-time | **Socket.IO** (per PRD's WebSockets option) for live tracking, status updates and job offers. Single instance; Redis adapter is the documented scale-out path |
 | Events | In-process `EventEmitter` behind an `EventPublisher` interface (job created/matched/accepted/status/completed/cancelled). Kafka is not required by the PRD and is the scale-out path |
-| Matching | Scoring engine in TypeScript (distance 40%, skill match 25%, rating 20%, load 15%); atomic claim via a conditional Postgres update (`WHERE status = 'MATCHED'`) |
+| Matching | Eligible = verified, online, skilled, idle, within radius. Ranked by fastest arrival (road time when available), ties by rating then distance — the PRD asks for the nearest/fastest technician. Atomic claim via a conditional Postgres update (`WHERE status = 'MATCHED'`) |
 | Maps | **Leaflet + OpenStreetMap** (free, no key) for maps; **OpenRouteService** for road travel time/ETA with haversine ÷ 25 km/h fallback. Avoids the PRD's map-API cost constraint |
 | Notifications | Web Push + SMS (MSG91); console fallback when keys absent |
 | Payments | **Out of scope Phase 1** (per PRD) — architecture leaves a `payment/` module stub |
@@ -51,9 +51,8 @@ Target: match + notify in <2s. Load online, verified, skilled technicians → fi
 ## 5. Data Model (Prisma)
 
 - **User** — id, name, email (unique), phone, passwordHash, role (CUSTOMER/TECHNICIAN/ADMIN), status
-- **TechnicianProfile** — userId, verificationStatus (UNSUBMITTED/PENDING/VERIFIED/REJECTED), documentKey, ratingAvg, ratingCount, completedJobs
+- **TechnicianProfile** — userId, verificationStatus (PENDING/VERIFIED/REJECTED, admin-approved), isOnline, lastLat/lastLng, ratingAvg, ratingCount, completedJobs
 - **TechnicianSkill** — technicianId, serviceId
-- **ServiceArea** — technicianId, center lat/lng + radiusKm
 - **Service** (catalog) — id, name, category, baseFee (paise), icon
 - **JobRequest** — id, customerId, serviceId, lat/lng, address, description, photoKeys, priority (NORMAL/URGENT), status, technicianId (nullable), createdAt, acceptedAt, completedAt, responseTimeSecs
 - **JobStatusHistory** — jobId, fromStatus, toStatus, at (audit trail)
@@ -66,8 +65,8 @@ CREATED → MATCHED → ACCEPTED → EN_ROUTE → ARRIVED → IN_PROGRESS → CO
 
 ## 6. Core Logic
 
-### 6.1 Matching score
-Eligible: VERIFIED, online, has the required skill, inside service area, within 15 km radius. Score (0–100): score = 40 × distanceScore + 25 × skillMatch + 20 × ratingNorm + 15 × loadScore. Highest wins; ties broken by earliest availability timestamp.
+### 6.1 Matching
+Eligible: VERIFIED, online, has the required skill, not on an active job or holding another offer, within 15 km (straight line). The 10 nearest get road travel times (OpenRouteService, fallback distance ÷ 25 km/h). Ranked by ETA ascending; ties by rating descending, then distance, then id. Offer creation is serialized with a Postgres advisory lock so a technician never holds two offers.
 
 ### 6.2 Atomic claim (race safety)
 `UPDATE JobRequest SET status = 'ACCEPTED' ... WHERE id = {id} AND status = 'MATCHED' AND technicianId = {techId}` — Postgres row locking makes it atomic. First accept wins; losers get ALREADY_CLAIMED.
