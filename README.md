@@ -5,8 +5,8 @@ auto-dispatch: the system scores available technicians by distance, skill, ratin
 load, then assigns the best match instantly. Live tracking, ETA, and an admin
 operations dashboard included.
 
-**Stack (per PRD):** Node.js 20 + Express 5 + TypeScript · PostgreSQL 16 + PostGIS ·
-Redis (GEO + pub/sub) · Kafka · Socket.IO · React 18 + Tailwind · Google Maps API
+**Stack:** Node.js 20 + Express 5 + TypeScript · PostgreSQL 16 + Prisma · Socket.IO ·
+React 18 + Vite + Tailwind · Leaflet + OpenStreetMap
 
 ## Docs
 - Design spec: `docs/superpowers/specs/2026-10-07-dispatch-design.md`
@@ -25,7 +25,7 @@ Redis (GEO + pub/sub) · Kafka · Socket.IO · React 18 + Tailwind · Google Map
 git clone <repo-url>
 cd sevaswift
 
-# 2. Start infrastructure (Postgres + PostGIS, Redis, Kafka)
+# 2. Start Postgres (also creates the sevaswift_test database for tests)
 docker compose up -d
 
 # 3. Backend setup
@@ -56,22 +56,19 @@ npm run dev
 All endpoints under `/api/v1`:
 
 ### Auth
-- `POST /api/v1/auth/register` — Register (CUSTOMER, TECHNICIAN)
+- `POST /api/v1/auth/register` — Register (CUSTOMER, TECHNICIAN; technicians start PENDING admin verification)
 - `POST /api/v1/auth/login` — Login
 - `POST /api/v1/auth/refresh` — Refresh access token
 - `POST /api/v1/auth/verify-email` — Verify email
 - `POST /api/v1/auth/forgot-password` — Request password reset
 - `POST /api/v1/auth/reset-password` — Reset password
 
-### Technicians
-- `GET /api/v1/technicians/me` — Get profile
-- `PATCH /api/v1/technicians/me` — Update profile
-- `POST /api/v1/technicians/me/documents` — Upload verification docs
-- `PATCH /api/v1/technicians/me/availability` — Toggle online/offline
-- `POST /api/v1/technicians/me/skills` — Add skill
-- `DELETE /api/v1/technicians/me/skills/:serviceId` — Remove skill
-- `POST /api/v1/technicians/me/service-areas` — Add service area
-- `DELETE /api/v1/technicians/me/service-areas/:id` — Remove service area
+### Technicians (role: TECHNICIAN)
+- `GET /api/v1/technicians/me` — Profile, verification status, skills, location
+- `PATCH /api/v1/technicians/me/availability` — Go online/offline (verified only; going offline declines the open offer)
+- `PUT /api/v1/technicians/me/skills` — Set skills (`{ serviceIds: [] }`)
+- `POST /api/v1/technicians/me/location` — GPS heartbeat
+- `GET /api/v1/technicians/me/offers` — Job offers waiting for a response
 
 ### Catalog
 - `GET /api/v1/services` — List all services
@@ -80,10 +77,30 @@ All endpoints under `/api/v1`:
 - `PATCH /api/v1/services/:id` — Update service (admin)
 - `DELETE /api/v1/services/:id` — Delete service (admin)
 
-### Jobs (Phase 2)
-- `POST /api/v1/jobs` — Create job request
-- `GET /api/v1/jobs` — List user's jobs
-- `GET /api/v1/jobs/:id` — Get job details
+### Jobs
+- `POST /api/v1/jobs` — Raise an emergency request (customer); dispatched immediately
+- `GET /api/v1/jobs` — List jobs (customer: own, technician: assigned, admin: all; `?status=`, `?active=true`)
+- `GET /api/v1/jobs/:id` — Job details, live ETA and status timeline
+- `POST /api/v1/jobs/:id/accept` — Accept an offer (technician; atomic, first accept wins)
+- `POST /api/v1/jobs/:id/reject` — Decline an offer; re-dispatched to the next-best technician
+- `POST /api/v1/jobs/:id/status` — `EN_ROUTE` → `ARRIVED` → `IN_PROGRESS` → `COMPLETED` (technician)
+- `POST /api/v1/jobs/:id/cancel` — Cancel before the technician arrives (customer or admin)
+- `POST /api/v1/jobs/:id/review` — Rate a completed job, once (customer)
+
+## How auto-dispatch works
+
+1. A customer raises a request with a service, location and priority.
+2. Candidates: technicians who are **verified, online, skilled in that service, not busy**, and within
+   `DISPATCH_RADIUS_KM` (default 15 km) of the job.
+3. Up to 10 nearest are sent to OpenRouteService for road travel time (if `ORS_API_KEY` is set;
+   otherwise distance ÷ `AVERAGE_SPEED_KMPH`).
+4. The technician with the **fastest arrival** gets the offer (ties: higher rating, then shorter distance).
+5. They have `OFFER_TIMEOUT_SECONDS` (default 60 s) to accept. Reject or timeout → the next-best
+   technician is offered the job, up to `MAX_DISPATCH_ROUNDS` (default 3).
+6. If nobody accepts, the job becomes `EXPIRED` for an admin to assign manually.
+
+Every status change is recorded in `JobStatusHistory` and every offer (with distance, ETA and response)
+in `JobOffer`, which gives the assignment, acceptance and status-change logs the PRD asks for.
 
 ## Project Structure
 
@@ -155,11 +172,10 @@ See `backend/.env.example` for all required variables. Key variables:
 | Variable | Description |
 |----------|-------------|
 | DATABASE_URL | PostgreSQL connection string |
-| REDIS_URL | Redis connection string |
 | JWT_ACCESS_SECRET | Access token secret (32+ chars) |
 | JWT_REFRESH_SECRET | Refresh token secret (32+ chars) |
 | CORS_ORIGIN | Frontend URL for CORS |
-| GOOGLE_MAPS_API_KEY | Google Maps API key (Phase 2+) |
+| TEST_DATABASE_URL | Database used by `npm test` (defaults to local `sevaswift_test`) |
 
 ## Testing
 
@@ -174,12 +190,10 @@ cd frontend && npm test
 
 ## Deployment (Phase 5)
 
-Per PRD requirements:
-- Backend → Render (Docker)
-- PostgreSQL → Neon (+ PostGIS)
-- Redis → Upstash
+- Backend → Render
+- PostgreSQL → Neon
 - Frontend → Vercel
-- Kafka → Self-hosted or deferred
+- Image uploads → Cloudinary
 
 ## License
 

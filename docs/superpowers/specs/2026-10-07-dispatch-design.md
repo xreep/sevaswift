@@ -15,16 +15,16 @@ SevaSwift is an on-demand emergency home-services platform (plumbing, electrical
 |---|---|
 | Repo structure | Monorepo: `backend/` (Node + Express) + `frontend/` (React) + `docs/`. Docker Compose for local infra |
 | Backend | **Node.js 20 LTS + Express.js 5 + TypeScript** (per PRD), Prisma ORM |
-| Database | **PostgreSQL 16 + PostGIS** (PRD allows MongoDB/PostgreSQL; Postgres chosen for geo queries and transactions); Prisma Migrate owns schema |
-| Live locations | **Redis GEO** (`GEOADD`/`GEORADIUS`) — technician positions updated every ~10s while online (ioredis) |
-| Real-time | **Socket.IO** (per PRD's WebSockets option) for live tracking + status; **Redis adapter** for fan-out across instances |
-| Events | **Kafka** (kafkajs) topics: `job.events` (created/matched/accepted/enroute/arrived/completed/cancelled) — event-driven core |
-| Matching | Scoring engine in TypeScript (distance 40%, skill match 25%, rating 20%, load 15%); atomic claim via Redis `SET NX` |
-| Maps | **Google Maps API** (per PRD) for customer/technician maps + ETA; note: requires billing-enabled key — budget the free tier carefully |
+| Database | **PostgreSQL 16** (PRD allows MongoDB/PostgreSQL; Postgres chosen for transactions); Prisma Migrate owns schema. Distance via haversine in TypeScript (no PostGIS needed at this scale) |
+| Live locations | Technician position stored on `TechnicianProfile` and broadcast over Socket.IO, updated every ~10s while online |
+| Real-time | **Socket.IO** (per PRD's WebSockets option) for live tracking, status updates and job offers. Single instance; Redis adapter is the documented scale-out path |
+| Events | In-process `EventEmitter` behind an `EventPublisher` interface (job created/matched/accepted/status/completed/cancelled). Kafka is not required by the PRD and is the scale-out path |
+| Matching | Eligible = verified, online, skilled, idle, within radius. Ranked by fastest arrival (road time when available), ties by rating then distance — the PRD asks for the nearest/fastest technician. Atomic claim via a conditional Postgres update (`WHERE status = 'MATCHED'`) |
+| Maps | **Leaflet + OpenStreetMap** (free, no key) for maps; **OpenRouteService** for road travel time/ETA with haversine ÷ 25 km/h fallback. Avoids the PRD's map-API cost constraint |
 | Notifications | Web Push + SMS (MSG91); console fallback when keys absent |
 | Payments | **Out of scope Phase 1** (per PRD) — architecture leaves a `payment/` module stub |
 | Auth | JWT access + rotating refresh tokens (httpOnly cookies); bcrypt; refresh-token reuse detection (replayed token → revoke all sessions), timing-safe login (dummy hash when email unknown) |
-| Deployment | **Required by PRD** — backend → Render, Postgres → Neon (+PostGIS), Redis → Upstash, frontend → Vercel, Kafka → self-hosted or deferred (see §9); GitHub Actions CI |
+| Deployment | **Required by PRD** — backend → Render, Postgres → Neon, frontend → Vercel, image uploads → Cloudinary; GitHub Actions CI |
 
 ## 3. Roles
 
@@ -43,17 +43,16 @@ SevaSwift is an on-demand emergency home-services platform (plumbing, electrical
 Pages (7, per PRD minimum): Login · Customer Request · Live Tracking · Service History · Technician Dashboard · Profile Management · Admin Panel. Role-guarded routes; TanStack Query; axios client with JWT auto-refresh.
 
 ### 4.3 Real-time & event flow
-Customer raises request → POST /api/v1/jobs → job CREATED → Kafka: job.created → Dispatch engine scores online technicians (Redis GEO radius + skill + rating + load) → Best match → job MATCHED → Kafka: job.matched → push/SMS to technician → Technician accepts within 60s (atomic claim, Redis SET NX) → ACCEPTED → customer sees live tracking (Socket.IO room job:{id}) → EN_ROUTE (GPS live) → ARRIVED → IN_PROGRESS → COMPLETED. Timeout/no acceptance → auto-reassign to next-best (up to 3 rounds) → else admin queue.
+Customer raises request → POST /api/v1/jobs → job CREATED → event job.created → Dispatch engine scores online technicians (radius + skill + rating + load) → Best match → job MATCHED → event job.matched → in-app Socket.IO offer to technician → Technician accepts within 60s (atomic conditional update) → ACCEPTED → customer sees live tracking (Socket.IO room job:{id}) → EN_ROUTE (GPS live) → ARRIVED → IN_PROGRESS → COMPLETED. Timeout/no acceptance → auto-reassign to next-best (up to 3 rounds) → else admin queue.
 
 ### 4.4 Dispatch performance
-Target: match + notify in <2s. Redis GEO radius query → score in TypeScript → single write. Live location updates via Socket.IO, throttled to 10s; positions in Redis only (not Postgres).
+Target: match + notify in <2s. Load online, verified, skilled technicians → filter by radius → score in TypeScript → single write. Live location updates via Socket.IO, throttled to 10s.
 
 ## 5. Data Model (Prisma)
 
 - **User** — id, name, email (unique), phone, passwordHash, role (CUSTOMER/TECHNICIAN/ADMIN), status
-- **TechnicianProfile** — userId, verificationStatus (UNSUBMITTED/PENDING/VERIFIED/REJECTED), documentKey, ratingAvg, ratingCount, completedJobs
+- **TechnicianProfile** — userId, verificationStatus (PENDING/VERIFIED/REJECTED, admin-approved), isOnline, lastLat/lastLng, ratingAvg, ratingCount, completedJobs
 - **TechnicianSkill** — technicianId, serviceId
-- **ServiceArea** — technicianId, PostGIS polygon (or center + radiusKm fallback)
 - **Service** (catalog) — id, name, category, baseFee (paise), icon
 - **JobRequest** — id, customerId, serviceId, lat/lng, address, description, photoKeys, priority (NORMAL/URGENT), status, technicianId (nullable), createdAt, acceptedAt, completedAt, responseTimeSecs
 - **JobStatusHistory** — jobId, fromStatus, toStatus, at (audit trail)
@@ -66,17 +65,17 @@ CREATED → MATCHED → ACCEPTED → EN_ROUTE → ARRIVED → IN_PROGRESS → CO
 
 ## 6. Core Logic
 
-### 6.1 Matching score
-Eligible: VERIFIED, online, has the required skill, inside service area, within 15 km radius. Score (0–100): score = 40 × distanceScore + 25 × skillMatch + 20 × ratingNorm + 15 × loadScore. Highest wins; ties broken by earliest availability timestamp.
+### 6.1 Matching
+Eligible: VERIFIED, online, has the required skill, not on an active job or holding another offer, within 15 km (straight line). The 10 nearest get road travel times (OpenRouteService, fallback distance ÷ 25 km/h). Ranked by ETA ascending; ties by rating descending, then distance, then id. Offer creation is serialized with a Postgres advisory lock so a technician never holds two offers.
 
 ### 6.2 Atomic claim (race safety)
-Redis `SET job:{id}:claim {techId} NX EX 60`. First accept wins; losers get ALREADY_CLAIMED.
+`UPDATE JobRequest SET status = 'ACCEPTED' ... WHERE id = {id} AND status = 'MATCHED' AND technicianId = {techId}` — Postgres row locking makes it atomic. First accept wins; losers get ALREADY_CLAIMED.
 
 ### 6.3 Reassignment
 60s to accept. On timeout/reject: next-best offered (max 3 rounds, excluding decliners). After 3 rounds → EXPIRED → admin manual-dispatch queue with full offer history.
 
 ### 6.4 ETA
-Google Maps Distance Matrix API initially (per PRD); haversine ÷ 25 km/h fallback if unavailable or over budget.
+OpenRouteService driving time; haversine ÷ 25 km/h fallback if unavailable or over the free quota.
 
 ### 6.5 Cancellation policy
 Customer cancels before accept: free. After accept, before arrival: ₹49 fee credited to technician. Technician cancels: strike; 3 strikes in 30 days → admin review.
@@ -92,11 +91,13 @@ Technicians upload ID + trade certificate; private storage, signed URLs; admin a
 - `GET /api/v1/technicians/me` — profile, availability toggle, earnings
 - `GET /api/v1/admin/overview|jobs|technicians|reports` — dispatcher dashboard
 - Socket.IO room `job:{id}` — technician lat/lng + status frames
-- `POST /api/v1/technicians/location` — GPS heartbeat (→ Redis GEO)
+- `POST /api/v1/technicians/location` — GPS heartbeat (stored + broadcast over Socket.IO)
 All errors: RFC 7807-style problem JSON `{ status, code, message, fieldErrors? }`.
 
 ## 8. Testing Strategy
 Backend: Jest + Supertest — scoring engine unit tests, claim race tests, lifecycle tests, API integration tests. Frontend: Vitest + Testing Library. Phase 5 includes a scripted end-to-end drill (raise → dispatch → accept → track → complete).
 
 ## 9. Deployment (PRD-mandated)
-Live link required. Backend → Render (Docker), Postgres → Neon (+PostGIS), Redis → Upstash, frontend → Vercel. Kafka: if managed Kafka blocks the timeline, Phase 1 ships an in-process event emitter behind the same `EventPublisher` interface; kafkajs wired in Phase 2 without touching domain code.
+Live link required. Backend → Render, Postgres → Neon, frontend → Vercel, uploads → Cloudinary.
+
+**Stack revision (2026-10-12):** Kafka, Redis and PostGIS were dropped — none is required by the PRD, and none runs on the free hosting tiers the deployment uses. Events go through an in-process `EventPublisher`; offer timeouts use in-process timers that are re-armed on startup. Scaling to multiple instances would add the Socket.IO Redis adapter and a job queue behind the same interfaces.

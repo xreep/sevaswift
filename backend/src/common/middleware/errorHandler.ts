@@ -1,15 +1,10 @@
-import { Request, Response, NextFunction } from 'express';
+import type { Request, Response, NextFunction } from 'express';
 import { AppError } from '../errors/index';
 import { config } from '../../config/index';
 import { ZodError } from 'zod';
 import { Prisma } from '@prisma/client';
 
-export function errorHandler(
-  err: Error,
-  _req: Request,
-  res: Response,
-  _next: NextFunction
-): void {
+export function errorHandler(err: Error, _req: Request, res: Response, _next: NextFunction): void {
   if (err instanceof AppError) {
     const problem = err.toProblemDetails(_req.originalUrl);
     res.status(problem.status).json(problem);
@@ -38,13 +33,37 @@ export function errorHandler(
     if (err.code === 'P2002') {
       const target = err.meta?.target as string[] | undefined;
       const field = target?.[0] ?? 'field';
-      const problem = new AppError(409, 'DUPLICATE_ENTRY', `A record with this ${field} already exists`).toProblemDetails(_req.originalUrl);
+      const problem = new AppError(
+        409,
+        'DUPLICATE_ENTRY',
+        `A record with this ${field} already exists`
+      ).toProblemDetails(_req.originalUrl);
       res.status(409).json(problem);
+      return;
+    }
+    if (err.code === 'P2003') {
+      const problem = new AppError(
+        409,
+        'IN_USE',
+        'This record is referenced by other records'
+      ).toProblemDetails(_req.originalUrl);
+      res.status(409).json(problem);
+      return;
+    }
+    if (err.code === 'P2025') {
+      const problem = new AppError(404, 'NOT_FOUND', 'Record not found').toProblemDetails(
+        _req.originalUrl
+      );
+      res.status(404).json(problem);
       return;
     }
   }
 
   console.error('Unhandled error:', err);
-  const problem = new AppError(500, 'INTERNAL_ERROR', config.nodeEnv === 'production' ? 'An unexpected error occurred' : err.message).toProblemDetails(_req.originalUrl);
+  const problem = new AppError(
+    500,
+    'INTERNAL_ERROR',
+    config.nodeEnv === 'production' ? 'An unexpected error occurred' : err.message
+  ).toProblemDetails(_req.originalUrl);
   res.status(500).json(problem);
 }

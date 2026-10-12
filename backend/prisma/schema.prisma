@@ -26,9 +26,22 @@ enum VerificationStatus {
   REJECTED
 }
 
+enum AuthTokenPurpose {
+  EMAIL_VERIFICATION
+  PASSWORD_RESET
+}
+
 enum JobPriority {
   NORMAL
   URGENT
+}
+
+enum OfferStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  EXPIRED
+  CANCELLED
 }
 
 enum JobStatus {
@@ -60,6 +73,7 @@ model User {
   technicianJobs    JobRequest[]      @relation("TechnicianJobs")
   reviews           Review[]
   refreshTokens     RefreshToken[]
+  authTokens        AuthToken[]
 
   @@index([email])
   @@index([role])
@@ -69,20 +83,19 @@ model TechnicianProfile {
   id                String   @id @default(uuid())
   userId            String   @unique
   user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  verificationStatus VerificationStatus @default(UNSUBMITTED)
-  documentKey       String?
-  documentType      String?
+  verificationStatus VerificationStatus @default(PENDING)
   rejectionReason   String?
   ratingAvg         Float    @default(0)
   ratingCount       Int      @default(0)
   completedJobs     Int      @default(0)
   isOnline          Boolean  @default(false)
-  lastLocation      String?  // "lat,lng" for Redis GEO fallback
+  lastLat           Float?
+  lastLng           Float?
+  locationUpdatedAt DateTime?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
   skills        TechnicianSkill[]
-  serviceAreas  ServiceArea[]
   jobOffers     JobOffer[]
 
   @@index([verificationStatus])
@@ -99,18 +112,6 @@ model TechnicianSkill {
 
   @@unique([technicianId, serviceId])
   @@index([serviceId])
-}
-
-model ServiceArea {
-  id           String @id @default(uuid())
-  technicianId String
-  technician   TechnicianProfile @relation(fields: [technicianId], references: [id], onDelete: Cascade)
-  centerLat    Float
-  centerLng    Float
-  radiusKm     Float
-  createdAt    DateTime @default(now())
-
-  @@index([technicianId])
 }
 
 model Service {
@@ -143,13 +144,16 @@ model JobRequest {
   lng             Float
   address         String
   description     String?
-  photoKeys       String[]
+  photoUrls       String[]
   priority        JobPriority @default(NORMAL)
   status          JobStatus  @default(CREATED)
-  responseTimeSecs Int?
+  responseTimeSecs Int?      // request created -> technician accepted
+  dispatchRounds  Int        @default(0)
   createdAt       DateTime   @default(now())
   acceptedAt      DateTime?
+  arrivedAt       DateTime?
   completedAt     DateTime?
+  cancelledAt     DateTime?
 
   statusHistory   JobStatusHistory[]
   offers          JobOffer[]
@@ -168,6 +172,7 @@ model JobStatusHistory {
   job       JobRequest @relation(fields: [jobId], references: [id], onDelete: Cascade)
   fromStatus JobStatus?
   toStatus   JobStatus
+  note       String?
   at        DateTime @default(now())
 
   @@index([jobId])
@@ -179,13 +184,17 @@ model JobOffer {
   job          JobRequest @relation(fields: [jobId], references: [id], onDelete: Cascade)
   technicianId String
   technician   TechnicianProfile @relation(fields: [technicianId], references: [id], onDelete: Cascade)
-  offeredAt    DateTime @default(now())
+  round        Int
+  distanceKm   Float
+  etaMinutes   Int
+  status       OfferStatus @default(PENDING)
+  offeredAt    DateTime
   expiresAt    DateTime
-  response     String?  // ACCEPTED, REJECTED, EXPIRED
+  respondedAt  DateTime?
 
-  @@index([jobId])
-  @@index([technicianId])
-  @@index([expiresAt])
+  @@index([jobId, status])
+  @@index([technicianId, status])
+  @@index([status, expiresAt])
 }
 
 model Review {
@@ -213,4 +222,19 @@ model RefreshToken {
 
   @@index([userId])
   @@index([expiresAt])
+}
+
+// Single-use tokens for email verification and password reset.
+// Kept apart from RefreshToken so one kind can never be redeemed as another.
+model AuthToken {
+  id        String           @id @default(uuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  purpose   AuthTokenPurpose
+  tokenHash String           @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  @@index([userId])
 }

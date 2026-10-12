@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+import type { Request, Response } from 'express';
 import { AppError } from '../errors/index';
 
 export function notFoundHandler(req: Request, _res: Response): void {

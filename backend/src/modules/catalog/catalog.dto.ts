@@ -12,7 +12,7 @@ export const createServiceSchema = z.object({
 
 export const updateServiceSchema = z.object({
   params: z.object({
-    id: z.string().uuid(),
+    id: z.string().min(1).max(64),
   }),
   body: z.object({
     name: z.string().min(1).max(100).optional(),
@@ -26,13 +26,13 @@ export const updateServiceSchema = z.object({
 
 export const getServiceSchema = z.object({
   params: z.object({
-    id: z.string().uuid(),
+    id: z.string().min(1).max(64),
   }),
 });
 
 export const deleteServiceSchema = z.object({
   params: z.object({
-    id: z.string().uuid(),
+    id: z.string().min(1).max(64),
   }),
 });
 
