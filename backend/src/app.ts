@@ -8,6 +8,8 @@ import { notFoundHandler } from './common/middleware/notFoundHandler';
 import { config } from './config/index';
 import authRoutes from './modules/auth/auth.routes';
 import catalogRoutes from './modules/catalog/catalog.routes';
+import jobsRoutes from './modules/jobs/jobs.routes';
+import techniciansRoutes from './modules/technicians/technicians.routes';
 
 const tooManyRequests = {
   status: 429,
@@ -62,6 +64,8 @@ export function createApp() {
 
   app.use('/api/v1/auth', authRoutes);
   app.use('/api/v1/services', catalogRoutes);
+  app.use('/api/v1/jobs', jobsRoutes);
+  app.use('/api/v1/technicians', techniciansRoutes);
 
   app.use(notFoundHandler);
   app.use(errorHandler);
