@@ -11,7 +11,11 @@ router.post('/login', validate(authDto.loginSchema), authController.login);
 router.post('/refresh', validate(authDto.refreshSchema), authController.refresh);
 router.post('/logout', authController.logout);
 router.post('/verify-email', validate(authDto.verifyEmailSchema), authController.verifyEmail);
-router.post('/forgot-password', validate(authDto.forgotPasswordSchema), authController.forgotPassword);
+router.post(
+  '/forgot-password',
+  validate(authDto.forgotPasswordSchema),
+  authController.forgotPassword
+);
 router.post('/reset-password', validate(authDto.resetPasswordSchema), authController.resetPassword);
 router.get('/me', authMiddleware, authController.me);
 

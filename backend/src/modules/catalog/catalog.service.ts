@@ -1,7 +1,7 @@
-import { PrismaClient, Prisma } from '@prisma/client';
-import { AppError, notFound } from '../../common/errors/index';
-
-const prisma = new PrismaClient();
+import type { Service } from '@prisma/client';
+import { prisma } from '../../common/prisma';
+import { notFound } from '../../common/errors/index';
+import type { CreateServiceInput, UpdateServiceInput } from './catalog.dto';
 
 export interface ServiceDto {
   id: string;
@@ -15,7 +15,7 @@ export interface ServiceDto {
   updatedAt: Date;
 }
 
-function toDto(service: any): ServiceDto {
+function toDto(service: Service): ServiceDto {
   return {
     id: service.id,
     name: service.name,
@@ -45,7 +45,7 @@ export async function getService(id: string): Promise<ServiceDto> {
   return toDto(service);
 }
 
-export async function createService(input: any): Promise<ServiceDto> {
+export async function createService(input: CreateServiceInput): Promise<ServiceDto> {
   const service = await prisma.service.create({
     data: {
       name: input.name,
@@ -58,7 +58,7 @@ export async function createService(input: any): Promise<ServiceDto> {
   return toDto(service);
 }
 
-export async function updateService(id: string, input: any): Promise<ServiceDto> {
+export async function updateService(id: string, input: UpdateServiceInput): Promise<ServiceDto> {
   const existing = await prisma.service.findUnique({ where: { id } });
   if (!existing) {
     throw notFound('SERVICE_NOT_FOUND', 'Service not found');

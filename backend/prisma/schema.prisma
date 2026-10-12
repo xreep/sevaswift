@@ -26,6 +26,11 @@ enum VerificationStatus {
   REJECTED
 }
 
+enum AuthTokenPurpose {
+  EMAIL_VERIFICATION
+  PASSWORD_RESET
+}
+
 enum JobPriority {
   NORMAL
   URGENT
@@ -60,6 +65,7 @@ model User {
   technicianJobs    JobRequest[]      @relation("TechnicianJobs")
   reviews           Review[]
   refreshTokens     RefreshToken[]
+  authTokens        AuthToken[]
 
   @@index([email])
   @@index([role])
@@ -213,4 +219,19 @@ model RefreshToken {
 
   @@index([userId])
   @@index([expiresAt])
+}
+
+// Single-use tokens for email verification and password reset.
+// Kept apart from RefreshToken so one kind can never be redeemed as another.
+model AuthToken {
+  id        String           @id @default(uuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  purpose   AuthTokenPurpose
+  tokenHash String           @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  @@index([userId])
 }

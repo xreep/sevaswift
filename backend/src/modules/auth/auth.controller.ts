@@ -1,7 +1,6 @@
-import { Request, Response, NextFunction } from 'express';
-import { AuthRequest } from '../../common/middleware/auth';
+import type { Request, Response, NextFunction } from 'express';
+import type { AuthRequest } from '../../common/middleware/auth';
 import * as authService from './auth.service';
-import { AppError } from '../../common/errors/index';
 
 export async function register(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
@@ -50,7 +49,11 @@ export async function verifyEmail(req: Request, res: Response, next: NextFunctio
   }
 }
 
-export async function forgotPassword(req: Request, res: Response, next: NextFunction): Promise<void> {
+export async function forgotPassword(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
   try {
     await authService.forgotPassword(req.body);
     res.json({ message: 'If the email exists, a reset link has been sent' });
@@ -59,7 +62,11 @@ export async function forgotPassword(req: Request, res: Response, next: NextFunc
   }
 }
 
-export async function resetPassword(req: Request, res: Response, next: NextFunction): Promise<void> {
+export async function resetPassword(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
   try {
     await authService.resetPassword(req.body);
     res.json({ message: 'Password reset successfully' });

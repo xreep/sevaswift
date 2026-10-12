@@ -3,8 +3,11 @@ import { z } from 'zod';
 export const registerSchema = z.object({
   body: z.object({
     name: z.string().min(2).max(100),
-    email: z.string().email().toLowerCase().trim(),
-    phone: z.string().regex(/^\+?[1-9]\d{1,14}$/).optional(),
+    email: z.string().trim().toLowerCase().email(),
+    phone: z
+      .string()
+      .regex(/^\+?[1-9]\d{1,14}$/)
+      .optional(),
     password: z.string().min(8).max(128),
     role: z.enum(['CUSTOMER', 'TECHNICIAN', 'ADMIN']),
   }),
@@ -12,7 +15,7 @@ export const registerSchema = z.object({
 
 export const loginSchema = z.object({
   body: z.object({
-    email: z.string().email().toLowerCase().trim(),
+    email: z.string().trim().toLowerCase().email(),
     password: z.string().min(1),
   }),
 });
@@ -31,7 +34,7 @@ export const verifyEmailSchema = z.object({
 
 export const forgotPasswordSchema = z.object({
   body: z.object({
-    email: z.string().email().toLowerCase().trim(),
+    email: z.string().trim().toLowerCase().email(),
   }),
 });
 

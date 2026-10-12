@@ -7,7 +7,7 @@ import { notFoundHandler } from '@/common/middleware/notFoundHandler';
 import authRoutes from '@/modules/auth/auth.routes';
 import { prisma } from '@/common/prisma';
 import bcrypt from 'bcrypt';
-import { setClock, getClock } from '@/common/utils/clock';
+import { setClock } from '@/common/utils/clock';
 
 const app = express();
 app.use(express.json());
@@ -106,14 +106,12 @@ describe('Auth Module', () => {
     });
 
     it('rejects duplicate email', async () => {
-      await request(app)
-        .post('/api/v1/auth/register')
-        .send({
-          name: 'Test User',
-          email: testEmail,
-          password: testPassword,
-          role: 'CUSTOMER',
-        });
+      await request(app).post('/api/v1/auth/register').send({
+        name: 'Test User',
+        email: testEmail,
+        password: testPassword,
+        role: 'CUSTOMER',
+      });
 
       const res = await request(app)
         .post('/api/v1/auth/register')
@@ -129,10 +127,7 @@ describe('Auth Module', () => {
     });
 
     it('validates required fields', async () => {
-      const res = await request(app)
-        .post('/api/v1/auth/register')
-        .send({})
-        .expect(400);
+      const res = await request(app).post('/api/v1/auth/register').send({}).expect(400);
 
       expect(res.body.code).toBe('VALIDATION_ERROR');
       expect(res.body.fieldErrors).toBeDefined();
@@ -198,10 +193,7 @@ describe('Auth Module', () => {
     });
 
     it('validates required fields', async () => {
-      const res = await request(app)
-        .post('/api/v1/auth/login')
-        .send({})
-        .expect(400);
+      const res = await request(app).post('/api/v1/auth/login').send({}).expect(400);
 
       expect(res.body.code).toBe('VALIDATION_ERROR');
     });
@@ -212,7 +204,7 @@ describe('Auth Module', () => {
 
     beforeEach(async () => {
       const passwordHash = await bcrypt.hash(testPassword, 10);
-      const user = await prisma.user.create({
+      await prisma.user.create({
         data: {
           name: 'Test User',
           email: testEmail,
@@ -227,8 +219,8 @@ describe('Auth Module', () => {
         .post('/api/v1/auth/login')
         .send({ email: testEmail, password: testPassword });
 
-      const cookies = Array.isArray(loginRes.headers['set-cookie']) 
-        ? loginRes.headers['set-cookie'] 
+      const cookies = Array.isArray(loginRes.headers['set-cookie'])
+        ? loginRes.headers['set-cookie']
         : [loginRes.headers['set-cookie']].filter(Boolean);
       const refreshCookie = cookies.find((c: string) => c.startsWith('refreshToken='));
       refreshToken = refreshCookie?.split(';')[0].split('=')[1] || '';
@@ -245,9 +237,7 @@ describe('Auth Module', () => {
     });
 
     it('rejects missing refresh token', async () => {
-      const res = await request(app)
-        .post('/api/v1/auth/refresh')
-        .expect(401);
+      const res = await request(app).post('/api/v1/auth/refresh').expect(401);
 
       expect(res.body.code).toBe('MISSING_REFRESH_TOKEN');
     });
@@ -278,9 +268,7 @@ describe('Auth Module', () => {
 
   describe('POST /api/v1/auth/logout', () => {
     it('clears refresh token cookie', async () => {
-      const res = await request(app)
-        .post('/api/v1/auth/logout')
-        .expect(204);
+      const res = await request(app).post('/api/v1/auth/logout').expect(204);
 
       expect(res.headers['set-cookie']).toBeDefined();
       const cookie = res.headers['set-cookie'][0];
