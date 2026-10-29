@@ -73,7 +73,7 @@ export default function CustomerHome() {
             )}
           </div>
         </div>
-        <div className="order-1 -mx-4 overflow-hidden sm:mx-0 sm:rounded-2xl lg:order-2">
+        <div className="order-1 -mx-4 -mt-6 overflow-hidden sm:mx-0 sm:mt-0 sm:rounded-2xl lg:order-2">
           <img
             src={HERO_PHOTO.src}
             srcSet={`${HERO_PHOTO.small} 720w, ${HERO_PHOTO.src} 1220w`}
@@ -118,8 +118,8 @@ export default function CustomerHome() {
                       className="aspect-[4/3] w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
                     />
                   ) : (
-                    <span className="flex aspect-[4/3] w-full items-center justify-center text-ink-soft">
-                      <ServiceIcon service={s} className="h-10 w-10" />
+                    <span className="flex aspect-[4/3] w-full items-center justify-center bg-gradient-to-br from-signal-soft to-paper text-ink-soft transition-colors group-hover:to-signal-soft">
+                      <ServiceIcon service={s} className="h-14 w-14" />
                     </span>
                   )}
                 </span>
