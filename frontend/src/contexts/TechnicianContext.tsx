@@ -3,6 +3,7 @@ import type { LatLng, TechnicianProfile } from '../types';
 import { errorMessage, technicianApi } from '../services/api';
 import { distanceKm, stepTowards } from '../lib/geo';
 import { useToast } from './ToastContext';
+import { useSocketEvent } from './SocketContext';
 
 export type LocationMode = 'gps' | 'manual';
 
@@ -12,6 +13,8 @@ interface TechnicianState {
   reload: () => Promise<void>;
   setProfile: (p: TechnicianProfile) => void;
   position: LatLng | null;
+  /** When the current position was last sent to the server. */
+  positionAt: string | null;
   mode: LocationMode;
   setMode: (m: LocationMode) => void;
   gpsError: string | null;
@@ -30,6 +33,8 @@ const MIN_MOVE_KM = 0.02;
 /** Demo drive: one step every 2 s, sped up so a few km take about a minute. */
 const DRIVE_TICK_MS = 2000;
 const DRIVE_STEP_KM = 0.12;
+/** While on duty, re-send the last position this often so the server knows the app is alive. */
+const HEARTBEAT_MS = 2 * 60_000;
 
 /**
  * Technician session state shared by every technician page: their profile and
@@ -42,11 +47,14 @@ export function TechnicianProvider({ children }: { children: React.ReactNode }) 
   const [profile, setProfile] = useState<TechnicianProfile | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [position, setPosition] = useState<LatLng | null>(null);
+  const [positionAt, setPositionAt] = useState<string | null>(null);
   const [mode, setMode] = useState<LocationMode>(() =>
     localStorage.getItem('techLocationMode') === 'manual' ? 'manual' : 'gps'
   );
   const [gpsError, setGpsError] = useState<string | null>(null);
   const [simulating, setSimulating] = useState(false);
+  const simulatingRef = useRef(false);
+  simulatingRef.current = simulating;
   const lastSent = useRef<{ at: number; p: LatLng } | null>(null);
   const driveTimer = useRef<number | null>(null);
 
@@ -55,7 +63,10 @@ export function TechnicianProvider({ children }: { children: React.ReactNode }) 
       const p = await technicianApi.me();
       setProfile(p);
       setLoadError(null);
-      if (p.location) setPosition(prev => prev ?? { lat: p.location!.lat, lng: p.location!.lng });
+      if (p.location) {
+        setPosition(prev => prev ?? { lat: p.location!.lat, lng: p.location!.lng });
+        setPositionAt(prev => prev ?? p.location!.updatedAt);
+      }
     } catch (err) {
       setLoadError(errorMessage(err, 'Could not load your profile'));
     }
@@ -74,7 +85,26 @@ export function TechnicianProvider({ children }: { children: React.ReactNode }) 
     lastSent.current = { at: now, p };
     setPosition(p);
     await technicianApi.sendLocation(p.lat, p.lng);
+    setPositionAt(new Date().toISOString());
   }, []);
+
+  // The server takes silent technicians off duty after 10 minutes; tell admins and the user why.
+  useSocketEvent<{ technicianId: string; isOnline: boolean }>('technician:availability', e => {
+    if (profile && e.technicianId === profile.user.id && e.isOnline !== profile.isOnline) {
+      reload();
+      if (!e.isOnline) toast('You are now off duty.', 'info');
+    }
+  });
+
+  // Heartbeat: keep the position fresh while on duty, even when standing still.
+  useEffect(() => {
+    if (!profile?.isOnline) return;
+    const id = window.setInterval(() => {
+      const p = lastSent.current?.p ?? position;
+      if (p && !simulatingRef.current) send(p, true).catch(() => undefined);
+    }, HEARTBEAT_MS);
+    return () => window.clearInterval(id);
+  }, [profile?.isOnline, position, send]);
 
   const changeMode = (m: LocationMode) => {
     setMode(m);
@@ -153,6 +183,7 @@ export function TechnicianProvider({ children }: { children: React.ReactNode }) 
         reload,
         setProfile,
         position,
+        positionAt,
         mode,
         setMode: changeMode,
         gpsError,

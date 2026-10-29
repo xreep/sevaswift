@@ -137,8 +137,9 @@ export default function AdminOverview() {
             {shownTechs.map(t => (
               <Marker key={t.id} position={[t.lat, t.lng]} icon={techIcon(stateOf(t))}>
                 <Popup>
-                  <p className="font-semibold">{t.name}</p>
+                  <p className="font-semibold">{t.name}{t.simulated && ' (simulated demo unit)'}</p>
                   <p>{t.skills.join(', ')}</p>
+                  <p>{t.lat.toFixed(5)}, {t.lng.toFixed(5)}</p>
                   <p>★ {t.ratingAvg.toFixed(1)}, seen {timeAgo(t.locationUpdatedAt, now)}</p>
                   {t.activeJobId && <Link to={`/jobs/${t.activeJobId}`}>Open current job</Link>}
                 </Popup>

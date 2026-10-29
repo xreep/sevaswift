@@ -48,7 +48,30 @@ export interface ApiError {
   code: string;
   message: string;
   fieldErrors?: Record<string, string[]>;
+  details?: { guard?: AssignmentGuard };
   instance?: string;
+}
+
+export interface AssignmentGuard {
+  level: 'ok' | 'warn' | 'confirm';
+  distanceKm: number;
+  etaMinutes: number;
+  locationAgeMins: number | null;
+  reasons: string[];
+}
+
+export interface DispatchAttempt {
+  at: string;
+  radiusKm: number;
+  outcome: 'OFFERED' | 'NO_CANDIDATES' | 'RADIUS_EXPANDED' | 'EXHAUSTED' | 'MANUAL_OFFER' | 'MANUAL_ASSIGN';
+  note: string | null;
+  candidates: {
+    technicianId: string;
+    name: string;
+    distanceKm: number;
+    etaMinutes: number;
+    reason: string | null;
+  }[];
 }
 
 export interface Service {
@@ -136,6 +159,19 @@ export interface Job {
     expiresAt: string;
   } | null;
   dispatchRounds: number;
+  dispatch: {
+    radiusKm: number;
+    offersMade: number;
+    currentOffer: {
+      technicianName: string;
+      distanceKm: number;
+      etaMinutes: number;
+      offeredAt: string;
+      expiresAt: string;
+    } | null;
+    widened: { radiusKm: number; at: string }[];
+  };
+  dispatchAttempts?: DispatchAttempt[];
   responseTimeSecs: number | null;
   createdAt: string;
   acceptedAt: string | null;
@@ -146,6 +182,7 @@ export interface Job {
   dispatchLog?: {
     technicianName: string;
     round: number;
+    radiusKm: number;
     status: 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED' | 'CANCELLED';
     distanceKm: number;
     etaMinutes: number;
@@ -192,6 +229,7 @@ export interface LiveTechnician extends LatLng {
   locationUpdatedAt: string | null;
   skills: string[];
   activeJobId: string | null;
+  simulated: boolean;
 }
 
 export interface LiveJob extends LatLng {
@@ -213,6 +251,7 @@ export interface AdminTechnician {
   phone: string | null;
   accountStatus: UserStatus;
   joinedAt: string;
+  simulated: boolean;
   verificationStatus: VerificationStatus;
   rejectionReason: string | null;
   isOnline: boolean;
@@ -243,6 +282,8 @@ export interface Candidate {
   busy: boolean;
   hasOtherOffer: boolean;
   assignable: boolean;
+  offerable: boolean;
+  guard: AssignmentGuard;
 }
 
 export interface Analytics {

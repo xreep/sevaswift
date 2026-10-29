@@ -25,6 +25,10 @@ export interface DomainEvents {
     technicianUserId: string;
     reason: 'ACCEPTED' | 'REJECTED' | 'EXPIRED' | 'CANCELLED';
   };
+  /** Dispatch progress the customer and admins should see (offer made or closed, radius widened). */
+  'job.dispatch_updated': {
+    jobId: string;
+  };
   'user.status_changed': {
     userId: string;
     status: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED';

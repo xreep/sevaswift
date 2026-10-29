@@ -1,5 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
-import type { AuthRequest } from '../../common/middleware/auth';
+import { authenticateAccessToken, type AuthRequest } from '../../common/middleware/auth';
 import * as authService from './auth.service';
 
 export async function register(req: Request, res: Response, next: NextFunction): Promise<void> {
@@ -33,7 +33,12 @@ export async function refresh(req: Request, res: Response, next: NextFunction): 
 export async function logout(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const refreshToken = req.cookies?.refreshToken;
-    await authService.logout(refreshToken, res);
+    // The access token, when still valid, identifies who is signing out even without the cookie.
+    const header = req.headers.authorization;
+    const accessUser = header?.startsWith('Bearer ')
+      ? await authenticateAccessToken(header.slice(7).trim()).catch(() => undefined)
+      : undefined;
+    await authService.logout(refreshToken, res, accessUser?.id);
     res.status(204).send();
   } catch (err) {
     next(err);

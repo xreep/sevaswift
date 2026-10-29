@@ -8,7 +8,8 @@ import { getClock } from '../../common/utils/clock';
  *
  *   CREATED → MATCHED (offer sent) → ACCEPTED → EN_ROUTE → ARRIVED → IN_PROGRESS → COMPLETED
  *
- * EXPIRED means no technician accepted; an admin can still assign one manually.
+ * EXPIRED means no technician accepted within the widest search radius; an admin
+ * can still offer it to someone (back to MATCHED) or assign it directly.
  * Cancellation is allowed until the technician has arrived.
  */
 export const TRANSITIONS: Record<JobStatus, readonly JobStatus[]> = {
@@ -20,7 +21,8 @@ export const TRANSITIONS: Record<JobStatus, readonly JobStatus[]> = {
   IN_PROGRESS: ['COMPLETED'],
   COMPLETED: [],
   CANCELLED: [],
-  EXPIRED: ['ACCEPTED', 'CANCELLED'],
+  // An admin can offer the job again (MATCHED) or assign it directly (ACCEPTED).
+  EXPIRED: ['MATCHED', 'ACCEPTED', 'CANCELLED'],
 };
 
 /** Statuses in which the assigned technician is busy with the job. */

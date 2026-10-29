@@ -4,7 +4,7 @@ import type { Role } from '@prisma/client';
 import { createApp } from '@/app';
 import { config } from '@/config/index';
 import { prisma } from '@/common/prisma';
-import { setClock } from '@/common/utils/clock';
+import { getClock, setClock } from '@/common/utils/clock';
 
 const app = createApp();
 const DOMAIN = '@admin.test';
@@ -40,6 +40,7 @@ async function makeTech(key: string, km: number) {
       verificationStatus: 'VERIFIED',
       isOnline: true,
       ratingAvg: 4.5,
+      locationUpdatedAt: new Date(getClock().now()),
       lastLat: SPOT.lat + km * KM,
       lastLng: SPOT.lng,
       skills: { create: { serviceId: SERVICE_ID } },
@@ -277,16 +278,32 @@ describe('manual assignment', () => {
     const res = await post(
       `/api/v1/admin/jobs/${expiredJobId}/assign`,
       'admin',
-      { technicianUserId: users.bravo.id },
+      { technicianUserId: users.bravo.id, acknowledgeWarning: true, confirmText: 'ASSIGN' },
       409
     );
     expect(res.body.code).toBe('TECHNICIAN_BUSY');
   });
 
-  it('assigns an expired job and records who did it', async () => {
+  it('demands a typed confirmation for an assignment far outside emergency limits', async () => {
+    at(START + 3600_000 + 300_000);
+    const blocked = await post(
+      `/api/v1/admin/jobs/${expiredJobId}/assign`,
+      'admin',
+      { technicianUserId: users.alpha.id, acknowledgeWarning: true },
+      409
+    );
+    expect(blocked.body.code).toBe('TYPED_CONFIRMATION_REQUIRED');
+    expect(blocked.body.details.guard.level).toBe('confirm');
+    expect(blocked.body.details.guard.distanceKm).toBeGreaterThan(400);
+    expect(blocked.body.details.guard.reasons.join(' ')).toMatch(/beyond the 40 km limit/);
+  });
+
+  it('assigns an expired job once confirmed and records who did it', async () => {
     at(START + 3600_000 + 300_000);
     const res = await post(`/api/v1/admin/jobs/${expiredJobId}/assign`, 'admin', {
       technicianUserId: users.alpha.id,
+      acknowledgeWarning: true,
+      confirmText: 'assign',
     });
     expect(res.body.job).toMatchObject({ status: 'ACCEPTED', responseTimeSecs: 300 });
     expect(res.body.job.technician.id).toBe(users.alpha.id);
@@ -301,7 +318,7 @@ describe('manual assignment', () => {
     const res = await post(
       `/api/v1/admin/jobs/${expiredJobId}/assign`,
       'admin',
-      { technicianUserId: users.alpha.id },
+      { technicianUserId: users.alpha.id, acknowledgeWarning: true, confirmText: 'ASSIGN' },
       409
     );
     expect(res.body.code).toBe('NOT_ASSIGNABLE');
@@ -374,6 +391,18 @@ describe('workforce management', () => {
       .set(auth('admin'))
       .send({ status: 'VERIFIED' })
       .expect(200);
+    // No location shared yet: going on duty is refused.
+    const noLocation = await request(app)
+      .patch('/api/v1/technicians/me/availability')
+      .set(techAuth())
+      .send({ isOnline: true })
+      .expect(409);
+    expect(noLocation.body.code).toBe('LOCATION_REQUIRED');
+    await request(app)
+      .post('/api/v1/technicians/me/location')
+      .set(techAuth())
+      .send(SPOT)
+      .expect(204);
     const res = await request(app)
       .patch('/api/v1/technicians/me/availability')
       .set(techAuth())

@@ -4,7 +4,7 @@ import type { Role } from '@prisma/client';
 import { createApp } from '@/app';
 import { config } from '@/config/index';
 import { prisma } from '@/common/prisma';
-import { setClock } from '@/common/utils/clock';
+import { getClock, setClock } from '@/common/utils/clock';
 import { expireOffer } from '@/modules/dispatch/dispatch.service';
 
 const app = createApp();
@@ -43,6 +43,7 @@ async function makeTech(
       verificationStatus: opts.verified === false ? 'PENDING' : 'VERIFIED',
       isOnline: opts.online ?? true,
       ratingAvg: opts.rating ?? 4.5,
+      locationUpdatedAt: new Date(getClock().now()),
       lastLat: JOB.lat + opts.km * KM,
       lastLng: JOB.lng,
       skills: { create: { serviceId: opts.skill ?? SERVICE_ID } },
@@ -198,13 +199,15 @@ describe('auto-dispatch', () => {
     expect(offer.round).toBe(2);
   });
 
-  it('reassigns on timeout and expires the job after the maximum rounds', async () => {
+  it('reassigns on timeout, widens the search 15 -> 25 -> 40 km, then waits for an admin', async () => {
     const job = await raiseJob();
     const names: string[] = [];
+    const radii: number[] = [];
 
-    for (let round = 1; round <= 3; round++) {
+    for (let round = 1; round <= 5; round++) {
       const offer = await pendingOffer(job.id);
       names.push(offer.technician.user.name);
+      radii.push(offer.radiusKm);
 
       // Not yet expired: nothing happens.
       advance(30);
@@ -214,15 +217,19 @@ describe('auto-dispatch', () => {
       await expireOffer(offer.id);
     }
 
-    expect(names).toEqual(['near', 'mid', 'far']);
+    // Three offers within 15 km, then the 9 km technician at 25 km, then the 30 km one at 40 km.
+    expect(names).toEqual(['near', 'mid', 'far', 'farther', 'outofrange']);
+    expect(radii).toEqual([15, 15, 15, 25, 40]);
     const res = await request(app).get(`/api/v1/jobs/${job.id}`).set(auth('admin')).expect(200);
     expect(res.body.job.status).toBe('EXPIRED');
-    expect(res.body.job.dispatchLog.map((o: { status: string }) => o.status)).toEqual([
-      'EXPIRED',
-      'EXPIRED',
-      'EXPIRED',
+    expect(res.body.job.dispatchRounds).toBe(5);
+    expect(res.body.job.dispatch.widened.map((w: { radiusKm: number }) => w.radiusKm)).toEqual([
+      25, 40,
     ]);
-    expect(res.body.job.timeline.at(-1).note).toMatch(/No technician accepted after 3 offers/);
+    expect(res.body.job.timeline.at(-1).note).toBe(
+      'No technician accepted after 5 offers within 40 km'
+    );
+    expect(res.body.job.dispatchAttempts.at(-1)).toMatchObject({ outcome: 'EXHAUSTED' });
   });
 
   it('rejects an accept after the offer window has passed', async () => {
@@ -266,7 +273,26 @@ describe('auto-dispatch', () => {
     try {
       const job = await raiseJob();
       expect(job.status).toBe('EXPIRED');
-      expect(job.timeline.at(-1).note).toMatch(/No available technician within 15 km/);
+      expect(job.timeline.at(-1).note).toBe('No available technician within 40 km');
+      // Every step is tried and logged before giving up.
+      const attempts = await prisma.dispatchAttempt.findMany({
+        where: { jobId: job.id },
+        orderBy: { at: 'asc' },
+      });
+      expect(attempts.map(a => `${a.outcome}@${a.radiusKm}`)).toEqual([
+        'NO_CANDIDATES@15',
+        'RADIUS_EXPANDED@25',
+        'NO_CANDIDATES@25',
+        'RADIUS_EXPANDED@40',
+        'NO_CANDIDATES@40',
+        'EXHAUSTED@40',
+      ]);
+      const reasons = (attempts[0].candidates as { name: string; reason: string }[]).map(
+        c => `${c.name}: ${c.reason}`
+      );
+      expect(reasons).toEqual(
+        expect.arrayContaining(['near: offline', 'unverified: not verified'])
+      );
     } finally {
       await prisma.technicianProfile.updateMany({
         where: { user: { email: { endsWith: DOMAIN } }, NOT: { user: { name: 'offline' } } },

@@ -32,6 +32,7 @@ router.patch(
 
 router.get('/jobs/:id/candidates', validate(adminDto.jobIdSchema), adminController.jobCandidates);
 router.post('/jobs/:id/assign', validate(adminDto.assignSchema), adminController.assignJob);
+router.post('/jobs/:id/offer', validate(adminDto.assignSchema), adminController.offerJob);
 
 router.get('/analytics', validate(adminDto.analyticsSchema), adminController.analytics);
 router.get('/reports/jobs.csv', validate(adminDto.analyticsSchema), adminController.jobsCsv);

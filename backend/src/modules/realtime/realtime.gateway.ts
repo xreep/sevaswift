@@ -25,6 +25,7 @@ export interface ServerToClientEvents {
   'job:location': (p: { jobId: string; lat: number; lng: number; at: Date; eta: LiveEta }) => void;
   'technician:location': (p: { technicianId: string; lat: number; lng: number; at: Date }) => void;
   'technician:availability': (p: { technicianId: string; isOnline: boolean }) => void;
+  'job:dispatch': (p: { jobId: string }) => void;
 }
 
 type Ack = (result: { ok: true } | { ok: false; code: string }) => void;
@@ -110,8 +111,17 @@ export function attachRealtime(server: HttpServer): Realtime {
       io.to(rooms).emit('job:status', { jobId, from, to, at: new Date(getClock().now()) });
     }),
 
+    // Offer made or closed, or search widened: the customer and admins refetch the job.
+    events.subscribe('job.dispatch_updated', ({ jobId }) => {
+      io.to([jobRoom(jobId), ADMINS]).emit('job:dispatch', { jobId });
+    }),
+
     events.subscribe('technician.availability', ({ technicianUserId, isOnline }) => {
-      io.to(ADMINS).emit('technician:availability', { technicianId: technicianUserId, isOnline });
+      // The technician's own devices hear it too (e.g. taken off duty after a missed heartbeat).
+      io.to([ADMINS, userRoom(technicianUserId)]).emit('technician:availability', {
+        technicianId: technicianUserId,
+        isOnline,
+      });
     }),
 
     // A suspended account loses its live connections immediately.

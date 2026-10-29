@@ -42,7 +42,12 @@ export const jobIdSchema = z.object({ params: z.object({ id: z.string().uuid() }
 
 export const assignSchema = z.object({
   params: z.object({ id: z.string().uuid() }),
-  body: z.object({ technicianUserId: z.string().uuid() }),
+  body: z.object({
+    technicianUserId: z.string().uuid(),
+    // Required when the assignment is outside emergency limits (see assignmentGuard).
+    acknowledgeWarning: z.boolean().optional(),
+    confirmText: z.string().max(20).optional(),
+  }),
 });
 
 export const analyticsSchema = z.object({

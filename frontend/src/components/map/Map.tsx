@@ -4,6 +4,12 @@ import 'leaflet/dist/leaflet.css';
 import { MapContainer, TileLayer, useMap, useMapEvents } from 'react-leaflet';
 import type { LatLng } from '../../types';
 
+// OpenStreetMap by default; a keyed provider can be set at build time (also add its host to CSP_IMG_HOSTS).
+const TILE_URL = import.meta.env.VITE_TILE_URL || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+const TILE_ATTRIBUTION =
+  import.meta.env.VITE_TILE_ATTRIBUTION ||
+  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+
 export function BaseMap({
   center,
   zoom = 13,
@@ -23,11 +29,7 @@ export function BaseMap({
         scrollWheelZoom
         style={{ height: '100%', width: '100%' }}
       >
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
-          maxZoom={19}
-        />
+        <TileLayer attribution={TILE_ATTRIBUTION} url={TILE_URL} maxZoom={19} />
         {children}
       </MapContainer>
     </div>

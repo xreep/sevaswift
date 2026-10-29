@@ -1,10 +1,10 @@
-import type { JobOffer, JobRequest, JobStatus } from '@prisma/client';
+import type { JobOffer, JobRequest, JobStatus, Prisma } from '@prisma/client';
 import { OfferStatus, UserStatus, VerificationStatus } from '@prisma/client';
 import { config } from '../../config/index';
 import { prisma } from '../../common/prisma';
 import { events } from '../../common/events/index';
 import { conflict, notFound } from '../../common/errors/index';
-import { haversineKm } from '../../common/geo/index';
+import { estimateMinutes, haversineKm } from '../../common/geo/index';
 import { getClock } from '../../common/utils/clock';
 import { ACTIVE_JOB_STATUSES, publishStatusChange, transitionJob } from '../jobs/lifecycle';
 import { rankCandidates } from './ranking';
@@ -18,6 +18,8 @@ export const DISPATCH_LOCK_KEY = 7_340_001;
 const MAX_ROUTED_CANDIDATES = 10;
 
 const DISPATCHABLE: JobStatus[] = ['CREATED', 'MATCHED'];
+/** Statuses an offer can be made from (EXPIRED only by an admin). */
+const OFFERABLE: JobStatus[] = ['CREATED', 'MATCHED', 'EXPIRED'];
 
 export interface Candidate {
   technicianId: string;
@@ -31,6 +33,15 @@ export interface Candidate {
   etaMinutes: number;
 }
 
+/** Every technician looked at for a job, with the reason they were passed over (null = eligible). */
+export interface ConsideredTechnician {
+  technicianId: string;
+  name: string;
+  distanceKm: number;
+  etaMinutes: number;
+  reason: string | null;
+}
+
 export type DispatchOutcome =
   | { outcome: 'OFFERED'; offer: JobOffer; candidate: Candidate }
   | { outcome: 'EXPIRED'; reason: string }
@@ -40,74 +51,142 @@ function now() {
   return new Date(getClock().now());
 }
 
-/**
- * Verified, online, skilled, idle technicians with a known location inside a
- * bounding box around the job, ranked by fastest arrival.
- */
-export async function findCandidates(
-  job: Pick<JobRequest, 'lat' | 'lng' | 'serviceId'>,
-  excludeTechnicianIds: string[] = []
-): Promise<Candidate[]> {
-  const radiusKm = config.dispatch.radiusKm;
-  const latDelta = radiusKm / 111;
-  const lngDelta = radiusKm / (111 * Math.max(Math.cos((job.lat * Math.PI) / 180), 0.01));
+/** Technicians examined per attempt and kept in the log (nearest first). */
+const MAX_LOGGED = 25;
 
-  const technicians = await prisma.technicianProfile.findMany({
+/**
+ * Looks at every technician with a known location around the job (out to 1.5x
+ * the radius, so "just outside" shows up in the log) and records why each one
+ * can or cannot take it. Eligible ones are ranked by fastest arrival.
+ */
+export async function evaluateCandidates(
+  job: Pick<JobRequest, 'lat' | 'lng' | 'serviceId'>,
+  radiusKm: number,
+  triedTechnicianIds: string[] = []
+): Promise<{ ranked: Candidate[]; considered: ConsideredTechnician[] }> {
+  const searchKm = radiusKm * 1.5;
+  const latDelta = searchKm / 111;
+  const lngDelta = searchKm / (111 * Math.max(Math.cos((job.lat * Math.PI) / 180), 0.01));
+  const at = getClock().now();
+
+  const profiles = await prisma.technicianProfile.findMany({
     where: {
-      id: { notIn: excludeTechnicianIds },
-      verificationStatus: VerificationStatus.VERIFIED,
-      isOnline: true,
       lastLat: { gte: job.lat - latDelta, lte: job.lat + latDelta },
       lastLng: { gte: job.lng - lngDelta, lte: job.lng + lngDelta },
-      user: { status: UserStatus.ACTIVE },
-      skills: { some: { serviceId: job.serviceId } },
-      jobOffers: { none: { status: OfferStatus.PENDING } },
     },
     select: {
       id: true,
       userId: true,
       ratingAvg: true,
+      isOnline: true,
+      verificationStatus: true,
       lastLat: true,
       lastLng: true,
-      user: { select: { name: true } },
+      locationUpdatedAt: true,
+      user: { select: { name: true, status: true } },
+      skills: { where: { serviceId: job.serviceId }, select: { id: true } },
+      jobOffers: { where: { status: OfferStatus.PENDING }, select: { jobId: true } },
     },
   });
 
-  const busy = await prisma.jobRequest.findMany({
-    where: {
-      technicianId: { in: technicians.map(t => t.userId) },
-      status: { in: ACTIVE_JOB_STATUSES },
-    },
-    select: { technicianId: true },
-  });
-  const busyUserIds = new Set(busy.map(b => b.technicianId));
+  const busy = new Set(
+    (
+      await prisma.jobRequest.findMany({
+        where: {
+          technicianId: { in: profiles.map(t => t.userId) },
+          status: { in: ACTIVE_JOB_STATUSES },
+        },
+        select: { technicianId: true },
+      })
+    ).map(b => b.technicianId)
+  );
+  const tried = new Set(triedTechnicianIds);
+  const { locationStaleMs, averageSpeedKmph } = config.dispatch;
 
-  const nearest = technicians
-    .filter(t => !busyUserIds.has(t.userId))
+  const examined = profiles
     .map(t => {
       const lat = t.lastLat as number;
       const lng = t.lastLng as number;
-      return {
-        technicianId: t.id,
-        userId: t.userId,
-        name: t.user.name,
-        ratingAvg: t.ratingAvg,
-        lat,
-        lng,
-        straightKm: haversineKm({ lat, lng }, job),
-      };
+      const straightKm = haversineKm({ lat, lng }, job);
+      const ageMs = t.locationUpdatedAt ? at - t.locationUpdatedAt.getTime() : Infinity;
+      let reason: string | null = null;
+      if (t.verificationStatus !== VerificationStatus.VERIFIED) reason = 'not verified';
+      else if (t.user.status !== UserStatus.ACTIVE) reason = 'account suspended';
+      else if (!t.isOnline) reason = 'offline';
+      else if (t.skills.length === 0) reason = 'no matching skill';
+      else if (ageMs > locationStaleMs) {
+        reason = Number.isFinite(ageMs)
+          ? `location stale (${Math.round(ageMs / 60_000)} min old)`
+          : 'location never shared';
+      } else if (straightKm > radiusKm) reason = `outside ${radiusKm} km`;
+      else if (busy.has(t.userId)) reason = 'on another job';
+      else if (tried.has(t.id)) reason = 'already offered this job';
+      else if (t.jobOffers.length > 0) reason = 'answering another offer';
+      return { t, lat, lng, straightKm, reason };
     })
-    .filter(c => c.straightKm <= radiusKm)
-    .sort((a, b) => a.straightKm - b.straightKm)
-    .slice(0, MAX_ROUTED_CANDIDATES);
+    .filter(e => e.straightKm <= searchKm)
+    .sort((a, b) => a.straightKm - b.straightKm);
 
+  const nearest = examined.filter(e => e.reason === null).slice(0, MAX_ROUTED_CANDIDATES);
   const travel = await estimateTravel(nearest, job);
-  const candidates = nearest.map((c, i) => ({
-    ...c,
+  const candidates = nearest.map((e, i) => ({
+    technicianId: e.t.id,
+    userId: e.t.userId,
+    name: e.t.user.name,
+    ratingAvg: e.t.ratingAvg,
+    lat: e.lat,
+    lng: e.lng,
+    straightKm: e.straightKm,
     distanceKm: travel[i].distanceKm,
     etaMinutes: travel[i].etaMinutes,
   }));
-  return rankCandidates(candidates, radiusKm);
+  const travelById = new Map(candidates.map(c => [c.technicianId, c]));
+
+  const considered = examined.slice(0, MAX_LOGGED).map(e => {
+    const routed = travelById.get(e.t.id);
+    return {
+      technicianId: e.t.userId,
+      name: e.t.user.name,
+      distanceKm: routed?.distanceKm ?? Math.round(e.straightKm * 100) / 100,
+      etaMinutes: routed?.etaMinutes ?? estimateMinutes(e.straightKm, averageSpeedKmph),
+      reason: e.reason,
+    };
+  });
+
+  return { ranked: rankCandidates(candidates, radiusKm), considered };
+}
+
+/** Eligible technicians for a job within a radius, fastest arrival first. */
+export async function findCandidates(
+  job: Pick<JobRequest, 'lat' | 'lng' | 'serviceId'>,
+  excludeTechnicianIds: string[] = [],
+  radiusKm: number = config.dispatch.radiusKm
+): Promise<Candidate[]> {
+  return (await evaluateCandidates(job, radiusKm, excludeTechnicianIds)).ranked;
+}
+
+export async function logAttempt(
+  jobId: string,
+  entry: {
+    radiusKm: number;
+    outcome: string;
+    candidates?: ConsideredTechnician[];
+    offeredTechnicianId?: string | null;
+    note?: string;
+  }
+) {
+  await prisma.dispatchAttempt.create({
+    data: {
+      jobId,
+      radiusKm: entry.radiusKm,
+      outcome: entry.outcome,
+      candidates: (entry.candidates ?? []) as unknown as Prisma.InputJsonValue,
+      offeredTechnicianId: entry.offeredTechnicianId ?? null,
+      note: entry.note,
+      at: now(),
+    },
+  });
+  events.publish('job.dispatch_updated', { jobId });
 }
 
 async function expireJob(jobId: string, from: JobStatus, reason: string): Promise<DispatchOutcome> {
@@ -119,39 +198,17 @@ async function expireJob(jobId: string, from: JobStatus, reason: string): Promis
   return { outcome: 'EXPIRED', reason };
 }
 
-/**
- * Offers the job to the best available technician. Called when a job is
- * created and again whenever an offer is rejected or times out. After
- * MAX_DISPATCH_ROUNDS unanswered offers (or with nobody in range) the job
- * becomes EXPIRED and waits for an admin to assign it manually.
- */
-export async function dispatchJob(jobId: string): Promise<DispatchOutcome> {
-  const job = await prisma.jobRequest.findUnique({
-    where: { id: jobId },
-    include: { offers: { select: { technicianId: true, status: true } } },
-  });
-  if (!job || !DISPATCHABLE.includes(job.status)) return { outcome: 'SKIPPED' };
-  if (job.offers.some(o => o.status === OfferStatus.PENDING)) return { outcome: 'SKIPPED' };
-
-  const { maxRounds, radiusKm, offerTimeoutSeconds } = config.dispatch;
-  if (job.dispatchRounds >= maxRounds) {
-    return expireJob(job.id, job.status, `No technician accepted after ${maxRounds} offers`);
-  }
-
-  const tried = job.offers.map(o => o.technicianId);
-  const ranked = await findCandidates(job, tried);
-  const noneReason =
-    tried.length === 0
-      ? `No available technician within ${radiusKm} km`
-      : 'No other available technician nearby';
-  if (ranked.length === 0) {
-    return expireJob(job.id, job.status, noneReason);
-  }
-
+/** Creates an offer for one technician under the dispatch lock; null if they became unavailable. */
+async function createOffer(
+  job: Pick<JobRequest, 'id'>,
+  candidate: Pick<Candidate, 'technicianId' | 'userId' | 'name' | 'distanceKm' | 'etaMinutes'>,
+  radiusKm: number,
+  note: string
+) {
   const offeredAt = now();
-  const expiresAt = new Date(offeredAt.getTime() + offerTimeoutSeconds * 1000);
+  const expiresAt = new Date(offeredAt.getTime() + config.dispatch.offerTimeoutSeconds * 1000);
 
-  const result = await prisma.$transaction(async tx => {
+  return prisma.$transaction(async tx => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(${DISPATCH_LOCK_KEY})`;
 
     const fresh = await tx.jobRequest.findUnique({
@@ -162,63 +219,186 @@ export async function dispatchJob(jobId: string): Promise<DispatchOutcome> {
         offers: { where: { status: OfferStatus.PENDING }, select: { id: true } },
       },
     });
-    if (!fresh || !DISPATCHABLE.includes(fresh.status) || fresh.offers.length > 0) return null;
+    if (!fresh || !OFFERABLE.includes(fresh.status) || fresh.offers.length > 0) return null;
 
-    for (const candidate of ranked) {
-      // Re-check under the lock: the technician may have been offered or assigned another job meanwhile.
-      const [pending, active] = await Promise.all([
-        tx.jobOffer.count({
-          where: { technicianId: candidate.technicianId, status: OfferStatus.PENDING },
-        }),
-        tx.jobRequest.count({
-          where: { technicianId: candidate.userId, status: { in: ACTIVE_JOB_STATUSES } },
-        }),
-      ]);
-      if (pending > 0 || active > 0) continue;
+    // Re-check under the lock: the technician may have been offered or assigned another job meanwhile.
+    const [pending, active] = await Promise.all([
+      tx.jobOffer.count({
+        where: { technicianId: candidate.technicianId, status: OfferStatus.PENDING },
+      }),
+      tx.jobRequest.count({
+        where: { technicianId: candidate.userId, status: { in: ACTIVE_JOB_STATUSES } },
+      }),
+    ]);
+    if (pending > 0 || active > 0) return 'BUSY' as const;
 
-      const round = fresh.dispatchRounds + 1;
-      const offer = await tx.jobOffer.create({
-        data: {
-          jobId: job.id,
-          technicianId: candidate.technicianId,
-          round,
-          distanceKm: candidate.distanceKm,
-          etaMinutes: candidate.etaMinutes,
-          offeredAt,
-          expiresAt,
-        },
+    const round = fresh.dispatchRounds + 1;
+    const offer = await tx.jobOffer.create({
+      data: {
+        jobId: job.id,
+        technicianId: candidate.technicianId,
+        round,
+        radiusKm,
+        distanceKm: candidate.distanceKm,
+        etaMinutes: candidate.etaMinutes,
+        offeredAt,
+        expiresAt,
+      },
+    });
+
+    let matched: JobRequest | null = null;
+    if (fresh.status === 'MATCHED') {
+      await tx.jobRequest.update({
+        where: { id: job.id },
+        data: { dispatchRounds: round, dispatchRadiusKm: radiusKm },
       });
-
-      let matched: JobRequest | null = null;
-      if (fresh.status === 'CREATED') {
-        matched = await transitionJob(tx, {
-          jobId: job.id,
-          from: 'CREATED',
-          to: 'MATCHED',
-          data: { dispatchRounds: round },
-          note: `Offered to ${candidate.name} (${candidate.distanceKm} km, ~${candidate.etaMinutes} min)`,
-        });
-      } else {
-        await tx.jobRequest.update({ where: { id: job.id }, data: { dispatchRounds: round } });
-      }
-      return { offer, candidate, matched };
+    } else {
+      matched = await transitionJob(tx, {
+        jobId: job.id,
+        from: fresh.status,
+        to: 'MATCHED',
+        data: { dispatchRounds: round, dispatchRadiusKm: radiusKm },
+        note,
+      });
     }
-    return 'NONE' as const;
+    return { offer, matched, from: fresh.status };
   });
+}
 
-  if (result === null) return { outcome: 'SKIPPED' };
-  if (result === 'NONE') return expireJob(job.id, job.status, noneReason);
-
-  const { offer, candidate, matched } = result;
-  if (matched) publishStatusChange(matched, 'CREATED');
-  scheduleOfferExpiry(offer.id, offer.expiresAt, () => expireOffer(offer.id));
+function announceOffer(
+  jobId: string,
+  created: { offer: JobOffer; matched: JobRequest | null; from: JobStatus },
+  technicianUserId: string
+) {
+  if (created.matched) publishStatusChange(created.matched, created.from);
+  scheduleOfferExpiry(created.offer.id, created.offer.expiresAt, () =>
+    expireOffer(created.offer.id)
+  );
   events.publish('job.offered', {
-    jobId: job.id,
-    offerId: offer.id,
-    technicianUserId: candidate.userId,
-    expiresAt: offer.expiresAt,
+    jobId,
+    offerId: created.offer.id,
+    technicianUserId,
+    expiresAt: created.offer.expiresAt,
   });
-  return { outcome: 'OFFERED', offer, candidate };
+}
+
+/**
+ * Offers the job to the best available technician. Called when a job is
+ * created and again whenever an offer is rejected or times out. Within each
+ * radius step up to MAX_DISPATCH_ROUNDS offers are made; then the search
+ * widens to the next step (15 -> 25 -> 40 km by default). When the last step
+ * is used up the job becomes EXPIRED and waits for an admin. Every decision is
+ * written to the dispatch log.
+ */
+export async function dispatchJob(jobId: string): Promise<DispatchOutcome> {
+  const job = await prisma.jobRequest.findUnique({
+    where: { id: jobId },
+    include: { offers: { select: { technicianId: true, status: true, radiusKm: true } } },
+  });
+  if (!job || !DISPATCHABLE.includes(job.status)) return { outcome: 'SKIPPED' };
+  if (job.offers.some(o => o.status === OfferStatus.PENDING)) return { outcome: 'SKIPPED' };
+
+  const steps = config.dispatch.radiusStepsKm;
+  const { maxRounds } = config.dispatch;
+  let stepIndex = Math.max(
+    0,
+    steps.findIndex(km => km >= job.dispatchRadiusKm)
+  );
+  const tried = job.offers.map(o => o.technicianId);
+
+  for (;;) {
+    const radiusKm = steps[stepIndex];
+    const offersInStep = job.offers.filter(o => o.radiusKm === radiusKm).length;
+
+    if (offersInStep < maxRounds) {
+      const { ranked, considered } = await evaluateCandidates(job, radiusKm, tried);
+      for (const candidate of ranked) {
+        const created = await createOffer(
+          job,
+          candidate,
+          radiusKm,
+          `Offered to ${candidate.name} (${candidate.distanceKm} km, ~${candidate.etaMinutes} min)`
+        );
+        if (created === null) return { outcome: 'SKIPPED' };
+        if (created === 'BUSY') continue;
+        await logAttempt(job.id, {
+          radiusKm,
+          outcome: 'OFFERED',
+          candidates: considered,
+          offeredTechnicianId: candidate.userId,
+          note: `Offered to ${candidate.name}, ${candidate.distanceKm} km away (~${candidate.etaMinutes} min)`,
+        });
+        announceOffer(job.id, created, candidate.userId);
+        return { outcome: 'OFFERED', offer: created.offer, candidate };
+      }
+      await logAttempt(job.id, {
+        radiusKm,
+        outcome: 'NO_CANDIDATES',
+        candidates: considered,
+        note: `No free technician within ${radiusKm} km`,
+      });
+    }
+
+    if (stepIndex + 1 < steps.length) {
+      stepIndex += 1;
+      const next = steps[stepIndex];
+      await prisma.jobRequest.update({ where: { id: job.id }, data: { dispatchRadiusKm: next } });
+      await logAttempt(job.id, {
+        radiusKm: next,
+        outcome: 'RADIUS_EXPANDED',
+        note: `Search widened from ${radiusKm} km to ${next} km`,
+      });
+      continue;
+    }
+
+    const offered = job.offers.length;
+    const reason =
+      offered > 0
+        ? `No technician accepted after ${offered} offer${offered > 1 ? 's' : ''} within ${radiusKm} km`
+        : `No available technician within ${radiusKm} km`;
+    await logAttempt(job.id, { radiusKm, outcome: 'EXHAUSTED', note: reason });
+    return expireJob(job.id, job.status, reason);
+  }
+}
+
+/**
+ * An admin offers the job to one technician (the default for manual
+ * assignment): the same 60-second offer, the same accept/decline, and if it
+ * lapses auto-dispatch carries on. Works for jobs waiting for a technician
+ * (EXPIRED) and to replace an open offer (MATCHED).
+ */
+export async function offerToTechnician(
+  jobId: string,
+  candidate: Pick<Candidate, 'technicianId' | 'userId' | 'name' | 'distanceKm' | 'etaMinutes'>,
+  adminName: string
+): Promise<JobOffer> {
+  const job = await prisma.jobRequest.findUnique({ where: { id: jobId } });
+  if (!job) throw notFound('JOB_NOT_FOUND', 'Job not found');
+  if (!OFFERABLE.includes(job.status)) {
+    throw conflict('NOT_ASSIGNABLE', 'Only jobs waiting for a technician can be offered');
+  }
+  if (job.status === 'MATCHED') await cancelOpenOffers(jobId);
+
+  const created = await createOffer(
+    job,
+    candidate,
+    job.dispatchRadiusKm,
+    `Offered to ${candidate.name} by ${adminName}`
+  );
+  if (created === null) {
+    throw conflict('JOB_CHANGED', 'The job was updated by someone else, please refresh');
+  }
+  if (created === 'BUSY') {
+    throw conflict('TECHNICIAN_BUSY', 'Technician is on another job or answering another offer');
+  }
+  await logAttempt(jobId, {
+    radiusKm: job.dispatchRadiusKm,
+    outcome: 'MANUAL_OFFER',
+    offeredTechnicianId: candidate.userId,
+    note: `${adminName} offered the job to ${candidate.name}, ${candidate.distanceKm} km away (~${candidate.etaMinutes} min)`,
+  });
+  announceOffer(jobId, created, candidate.userId);
+  return created.offer;
 }
 
 async function technicianProfileFor(userId: string) {

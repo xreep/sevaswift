@@ -58,10 +58,23 @@ export const jobCandidates = handle(async (req, res) => {
 });
 
 export const assignJob = handle(async (req, res) => {
+  const { technicianUserId, ...confirmation } = req.body;
   const job = await adminService.assignJob(
     req.user!.id,
     req.params.id as string,
-    req.body.technicianUserId
+    technicianUserId,
+    confirmation
+  );
+  res.json({ job });
+});
+
+export const offerJob = handle(async (req, res) => {
+  const { technicianUserId, ...confirmation } = req.body;
+  const job = await adminService.offerJob(
+    req.user!.id,
+    req.params.id as string,
+    technicianUserId,
+    confirmation
   );
   res.json({ job });
 });
