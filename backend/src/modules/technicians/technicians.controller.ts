@@ -62,3 +62,12 @@ export async function listOffers(
     next(err);
   }
 }
+
+export async function getStats(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const stats = await techniciansService.getStats(req.user!.id);
+    res.json({ stats });
+  } catch (err) {
+    next(err);
+  }
+}

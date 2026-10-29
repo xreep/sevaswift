@@ -21,5 +21,6 @@ router.post(
   techniciansController.updateLocation
 );
 router.get('/me/offers', techniciansController.listOffers);
+router.get('/me/stats', techniciansController.getStats);
 
 export default router;

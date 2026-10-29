@@ -16,6 +16,22 @@ export default defineConfig({
         target: 'http://localhost:4000',
         changeOrigin: true,
       },
+      '/socket.io': {
+        target: 'http://localhost:4000',
+        ws: true,
+        changeOrigin: true,
+      },
+    },
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          react: ['react', 'react-dom', 'react-router-dom'],
+          map: ['leaflet', 'react-leaflet'],
+          forms: ['react-hook-form', '@hookform/resolvers', 'zod', 'axios', 'socket.io-client'],
+        },
+      },
     },
   },
   test: {

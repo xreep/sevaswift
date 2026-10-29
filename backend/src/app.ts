@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -10,6 +12,9 @@ import authRoutes from './modules/auth/auth.routes';
 import catalogRoutes from './modules/catalog/catalog.routes';
 import jobsRoutes from './modules/jobs/jobs.routes';
 import techniciansRoutes from './modules/technicians/technicians.routes';
+import usersRoutes from './modules/users/users.routes';
+import uploadsRoutes from './modules/uploads/uploads.routes';
+import adminRoutes from './modules/admin/admin.routes';
 
 const tooManyRequests = {
   status: 429,
@@ -23,7 +28,23 @@ export function createApp() {
 
   // Render/Vercel sit behind a proxy; needed for correct client IPs in rate limiting.
   app.set('trust proxy', 1);
-  app.use(helmet());
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          // Map tiles come from OpenStreetMap; geocoding from Nominatim.
+          'img-src': [
+            "'self'",
+            'data:',
+            'blob:',
+            'https://tile.openstreetmap.org',
+            'https://*.tile.openstreetmap.org',
+          ],
+          'connect-src': ["'self'", 'https://nominatim.openstreetmap.org', 'wss:', 'ws:'],
+        },
+      },
+    })
+  );
   app.use(cors({ origin: config.corsOrigin, credentials: true }));
   app.use(express.json({ limit: '1mb' }));
   app.use(cookieParser());
@@ -66,6 +87,18 @@ export function createApp() {
   app.use('/api/v1/services', catalogRoutes);
   app.use('/api/v1/jobs', jobsRoutes);
   app.use('/api/v1/technicians', techniciansRoutes);
+  app.use('/api/v1/users', usersRoutes);
+  app.use('/api/v1/uploads', uploadsRoutes);
+  app.use('/api/v1/admin', adminRoutes);
+
+  // Single-service deployment: serve the built web app and let it handle client routes.
+  const dist = config.frontendDist ? path.resolve(config.frontendDist) : null;
+  if (dist && fs.existsSync(path.join(dist, 'index.html'))) {
+    app.use(express.static(dist, { index: false, maxAge: '1h' }));
+    app.get(/^(?!\/api\/|\/socket\.io\/|\/health$).*/, (_req, res) => {
+      res.sendFile(path.join(dist, 'index.html'));
+    });
+  }
 
   app.use(notFoundHandler);
   app.use(errorHandler);

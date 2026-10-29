@@ -4,6 +4,7 @@ import { prisma } from '../../common/prisma';
 import { badRequest, conflict, notFound } from '../../common/errors/index';
 import { getClock } from '../../common/utils/clock';
 import { cancelOpenOffers, dispatchJob } from '../dispatch/dispatch.service';
+import { assertOwnedUploads } from '../uploads/uploads.service';
 import {
   ACTIVE_JOB_STATUSES,
   assertTransition,
@@ -85,6 +86,9 @@ export async function createJob(customerId: string, input: CreateJobInput) {
   });
   if (open >= 3) {
     throw conflict('TOO_MANY_OPEN_REQUESTS', 'You already have 3 open requests');
+  }
+  if (input.photoUrls.length > 0) {
+    await assertOwnedUploads(customerId, input.photoUrls);
   }
 
   const createdAt = now();

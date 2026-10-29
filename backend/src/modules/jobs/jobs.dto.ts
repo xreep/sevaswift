@@ -10,7 +10,11 @@ export const createJobSchema = z.object({
     address: z.string().trim().min(3).max(300),
     description: z.string().trim().max(1000).optional(),
     priority: z.enum(['NORMAL', 'URGENT']).default('NORMAL'),
-    photoUrls: z.array(z.string().url().startsWith('https://')).max(3).default([]),
+    // Paths returned by POST /uploads; ownership is checked when the job is created.
+    photoUrls: z
+      .array(z.string().regex(/^\/api\/v1\/uploads\/[0-9a-f-]{36}$/, 'Upload the photo first'))
+      .max(3)
+      .default([]),
   }),
 });
 

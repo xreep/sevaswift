@@ -24,6 +24,7 @@ export interface ServerToClientEvents {
   'job:status': (p: { jobId: string; from: JobStatus | null; to: JobStatus; at: Date }) => void;
   'job:location': (p: { jobId: string; lat: number; lng: number; at: Date; eta: LiveEta }) => void;
   'technician:location': (p: { technicianId: string; lat: number; lng: number; at: Date }) => void;
+  'technician:availability': (p: { technicianId: string; isOnline: boolean }) => void;
 }
 
 type Ack = (result: { ok: true } | { ok: false; code: string }) => void;
@@ -107,6 +108,15 @@ export function attachRealtime(server: HttpServer): Realtime {
       if (technicianUserId) rooms.push(userRoom(technicianUserId));
       // A socket in several of these rooms still receives the frame once.
       io.to(rooms).emit('job:status', { jobId, from, to, at: new Date(getClock().now()) });
+    }),
+
+    events.subscribe('technician.availability', ({ technicianUserId, isOnline }) => {
+      io.to(ADMINS).emit('technician:availability', { technicianId: technicianUserId, isOnline });
+    }),
+
+    // A suspended account loses its live connections immediately.
+    events.subscribe('user.status_changed', ({ userId, status }) => {
+      if (status !== 'ACTIVE') io.in(userRoom(userId)).disconnectSockets(true);
     }),
 
     events.subscribe('technician.location', ({ technicianUserId, lat, lng, at }) => {

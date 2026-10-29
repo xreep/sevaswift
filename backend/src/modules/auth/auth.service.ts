@@ -8,6 +8,7 @@ import { config } from '../../config/index';
 import { prisma } from '../../common/prisma';
 import { getClock } from '../../common/utils/clock';
 import { badRequest, conflict, unauthorized, notFound } from '../../common/errors/index';
+import { sendMail } from '../../common/mail/index';
 import type {
   RegisterInput,
   LoginInput,
@@ -103,11 +104,8 @@ async function consumeAuthToken(token: string, purpose: AuthTokenPurpose) {
   return stored;
 }
 
-// No email provider is configured, so links are logged for local development only.
-function logDevLink(label: string, path: string, token: string) {
-  if (config.nodeEnv === 'development') {
-    console.warn(`[auth] ${label}: ${config.corsOrigin}${path}?token=${token}`);
-  }
+function appLink(path: string, token: string) {
+  return `${config.appUrl.replace(/\/$/, '')}${path}?token=${token}`;
 }
 
 export async function register(input: RegisterInput, res: Response) {
@@ -141,7 +139,11 @@ export async function register(input: RegisterInput, res: Response) {
     AuthTokenPurpose.EMAIL_VERIFICATION,
     EMAIL_VERIFICATION_TTL_MS
   );
-  logDevLink('Email verification link', '/verify-email', verificationToken);
+  void sendMail({
+    to: user.email,
+    subject: 'Verify your SevaSwift email',
+    text: `Hi ${user.name},\n\nConfirm your email address by opening this link (valid for 24 hours):\n${appLink('/verify-email', verificationToken)}\n`,
+  });
 
   const accessToken = await issueSession(res, user);
   return { user, accessToken };
@@ -264,7 +266,11 @@ export async function forgotPassword(input: ForgotPasswordInput): Promise<string
     AuthTokenPurpose.PASSWORD_RESET,
     PASSWORD_RESET_TTL_MS
   );
-  logDevLink('Password reset link', '/reset-password', resetToken);
+  void sendMail({
+    to: user.email,
+    subject: 'Reset your SevaSwift password',
+    text: `Hi ${user.name},\n\nReset your password with this link (valid for 1 hour):\n${appLink('/reset-password', resetToken)}\n\nIf you did not ask for this, you can ignore this email.\n`,
+  });
   return resetToken;
 }
 

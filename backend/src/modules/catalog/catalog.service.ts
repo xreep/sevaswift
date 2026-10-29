@@ -29,10 +29,10 @@ function toDto(service: Service): ServiceDto {
   };
 }
 
-export async function listServices(): Promise<ServiceDto[]> {
+export async function listServices(includeInactive = false): Promise<ServiceDto[]> {
   const services = await prisma.service.findMany({
-    where: { isActive: true },
-    orderBy: { category: 'asc' },
+    where: includeInactive ? {} : { isActive: true },
+    orderBy: [{ category: 'asc' }, { name: 'asc' }],
   });
   return services.map(toDto);
 }
