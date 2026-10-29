@@ -101,7 +101,9 @@ export function createApp() {
   const dist = config.frontendDist ? path.resolve(config.frontendDist) : null;
   if (dist && fs.existsSync(path.join(dist, 'index.html'))) {
     app.use(express.static(dist, { index: false, maxAge: '1h' }));
-    app.get(/^(?!\/api\/|\/socket\.io\/|\/health$).*/, (_req, res) => {
+    // Client routes get the app; a missing file (any path with an extension, e.g. a deleted
+    // image) falls through to a real 404 instead of a misleading 200 page.
+    app.get(/^(?!\/api\/|\/socket\.io\/|\/health$)(?!.*\.[a-z0-9]{2,5}$).*/i, (_req, res) => {
       res.sendFile(path.join(dist, 'index.html'));
     });
   }
