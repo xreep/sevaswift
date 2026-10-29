@@ -5,7 +5,10 @@ import { adminApi, errorMessage } from '../../services/api';
 import { useSocketEvent } from '../../contexts/SocketContext';
 import { useToast } from '../../contexts/ToastContext';
 import { EmptyState, ErrorNotice, Modal, PageHeader, Spinner, StatusBadge, Tabs } from '../../components/ui';
-import { duration, formatDateTime, minutes, percent, rating } from '../../lib/format';
+import { duration, formatDateTime, minutes, percent, rating, timeAgo } from '../../lib/format';
+import { STALE_MS } from '../../components/LocationLine';
+
+const isStale = (at: string | null) => !at || Date.now() - new Date(at).getTime() > STALE_MS;
 import ServiceIcon from '../../components/ServiceIcon';
 
 type Tab = 'PENDING' | 'VERIFIED' | 'REJECTED' | 'ALL';
@@ -141,6 +144,23 @@ export default function AdminTechnicians() {
                     <p className="font-semibold">{t.name}</p>
                     <p className="text-xs text-ink-muted">{t.email}{t.phone && `, ${t.phone}`}</p>
                     <p className="text-xs text-ink-muted">Joined {formatDateTime(t.joinedAt)}</p>
+                    {t.simulated && (
+                      <span className="mt-1 inline-block rounded-sm bg-route-soft px-1.5 py-0.5 text-[11px] font-semibold text-route">
+                        Simulated demo unit
+                      </span>
+                    )}
+                    <p className="num text-xs text-ink-muted">
+                      {t.location ? (
+                        <>
+                          {t.location.lat.toFixed(5)}, {t.location.lng.toFixed(5)} —{' '}
+                          <span className={isStale(t.location.updatedAt) ? 'font-semibold text-alert' : ''}>
+                            {isStale(t.location.updatedAt) ? 'stale, ' : ''}seen {timeAgo(t.location.updatedAt)}
+                          </span>
+                        </>
+                      ) : (
+                        'No location shared'
+                      )}
+                    </p>
                     {t.verificationStatus === 'REJECTED' && t.rejectionReason && (
                       <p className="text-xs text-alert">Not approved: {t.rejectionReason}</p>
                     )}

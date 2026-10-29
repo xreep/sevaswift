@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Marker, Polyline, Popup } from 'react-leaflet';
-import type { Candidate, Job, Role } from '../types';
+import axios from 'axios';
+import type { ApiError, AssignmentGuard, Candidate, DispatchAttempt, Job, Role } from '../types';
 import { adminApi, errorMessage, jobsApi } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useJobRoom, useSocketEvent } from '../contexts/SocketContext';
@@ -10,6 +11,7 @@ import { useToast } from '../contexts/ToastContext';
 import { useNow } from '../hooks/useNow';
 import { BaseMap, FitBounds, homeIcon, techIcon } from '../components/map/Map';
 import { RouteStrip, Timeline } from '../components/JobProgress';
+import LocationLine from '../components/LocationLine';
 import {
   ErrorNotice,
   Modal,
@@ -83,6 +85,11 @@ export default function JobDetail() {
     load();
   });
 
+  // An offer was made or closed, or the search widened.
+  useSocketEvent<{ jobId: string }>('job:dispatch', e => {
+    if (e.jobId === id) load();
+  });
+
   useSocketEvent<{ jobId: string; lat: number; lng: number; at: string; eta: Job['eta'] }>(
     'job:location',
     e => {
@@ -143,7 +150,7 @@ export default function JobDetail() {
             {searching ? (
               <Searching job={job} role={role} />
             ) : job.status === 'EXPIRED' ? (
-              <Unassigned role={role} />
+              <Unassigned role={role} radiusKm={job.dispatch.radiusKm} asked={job.dispatch.offersMade} />
             ) : job.status === 'CANCELLED' ? (
               <p className="text-ink-soft">
                 This request was cancelled{job.cancelledAt && <> at {formatTime(job.cancelledAt)}</>}.
@@ -199,6 +206,9 @@ export default function JobDetail() {
               <div>
                 <dt className="text-ink-muted">Address</dt>
                 <dd>{job.location.address}</dd>
+                <dd className="mt-1">
+                  <LocationLine lat={job.location.lat} lng={job.location.lng} />
+                </dd>
               </div>
               {job.description && (
                 <div>
@@ -242,38 +252,7 @@ export default function JobDetail() {
             <Timeline job={job} role={role} />
           </section>
 
-          {role === 'ADMIN' && job.dispatchLog && job.dispatchLog.length > 0 && (
-            <section className="panel p-5">
-              <h2 className="mb-3 font-display text-xl font-semibold">Dispatch log</h2>
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Round</th>
-                    <th>Technician</th>
-                    <th>Distance</th>
-                    <th>Outcome</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {job.dispatchLog.map(o => (
-                    <tr key={`${o.round}-${o.offeredAt}`}>
-                      <td className="num">{o.round}</td>
-                      <td>{o.technicianName}</td>
-                      <td className="num">{o.distanceKm} km, ~{o.etaMinutes} min</td>
-                      <td>
-                        {o.status.charAt(0) + o.status.slice(1).toLowerCase()}
-                        {o.respondedAt && (
-                          <span className="block text-xs text-ink-muted">
-                            after {duration((new Date(o.respondedAt).getTime() - new Date(o.offeredAt).getTime()) / 1000)}
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </section>
-          )}
+          {role === 'ADMIN' && <DispatchLogPanel job={job} />}
         </aside>
       </div>
     </div>
@@ -317,27 +296,52 @@ function EtaReadout({ job }: { job: Job }) {
 }
 
 function Searching({ job, role }: { job: Job; role: Role }) {
+  const now = useNow(1000);
+  const offer = job.dispatch.currentOffer;
+  const left = offer ? Math.max(0, Math.ceil((new Date(offer.expiresAt).getTime() - now) / 1000)) : 0;
+  const waited = Math.max(0, Math.round((now - new Date(job.createdAt).getTime()) / 1000));
+  const widened = job.dispatch.widened[job.dispatch.widened.length - 1];
+
   return (
     <div className="flex items-start gap-4">
       <span className="live-dot mt-1 h-4 w-4 shrink-0 rounded-full bg-signal" aria-hidden />
-      <div>
+      <div className="min-w-0 flex-1">
         <p className="font-display text-3xl font-semibold">Finding the nearest technician</p>
-        <p className="mt-1 text-ink-soft">
-          {job.dispatchRounds > 0
-            ? `Offer ${job.dispatchRounds} sent to the closest available technician. If they don't accept within a minute, the next closest gets it.`
-            : 'Checking who is available near you.'}
-        </p>
-        {role === 'ADMIN' && job.offer && (
-          <p className="mt-2 text-sm text-ink-muted">
-            Current offer expires {formatTime(job.offer.expiresAt)} ({job.offer.distanceKm} km away).
+        {offer ? (
+          <p className="mt-1 text-ink-soft">
+            Asked <span className="font-semibold text-ink">{offer.technicianName}</span>,{' '}
+            <span className="num">{offer.distanceKm} km</span> away (about {offer.etaMinutes} min).
+            Waiting for their answer:{' '}
+            <span className="num font-semibold text-ink">0:{String(left).padStart(2, '0')}</span>
           </p>
+        ) : (
+          <p className="mt-1 text-ink-soft">Checking who is free near you.</p>
+        )}
+        <p className="mt-2 text-sm text-ink-muted">
+          Searching within {job.dispatch.radiusKm} km
+          {widened && <> (widened at {formatTime(widened.at)} because nobody closer was free)</>}.
+          {job.dispatch.offersMade > 0 && <> {job.dispatch.offersMade} {job.dispatch.offersMade === 1 ? 'technician' : 'technicians'} asked so far.</>}{' '}
+          Waiting {duration(waited)}.
+        </p>
+        {offer && (
+          <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-line" aria-hidden>
+            <div
+              className="h-full bg-signal transition-[width] duration-1000 ease-linear"
+              style={{
+                width: `${(left / Math.max(1, (new Date(offer.expiresAt).getTime() - new Date(offer.offeredAt).getTime()) / 1000)) * 100}%`,
+              }}
+            />
+          </div>
+        )}
+        {role === 'ADMIN' && offer && (
+          <p className="mt-2 text-xs text-ink-muted">If they do not answer, the next nearest free technician is asked automatically.</p>
         )}
       </div>
     </div>
   );
 }
 
-function Unassigned({ role }: { role: Role }) {
+function Unassigned({ role, radiusKm, asked }: { role: Role; radiusKm: number; asked: number }) {
   return (
     <div>
       <p className="font-display text-3xl font-semibold text-alert">
@@ -347,6 +351,10 @@ function Unassigned({ role }: { role: Role }) {
         {role === 'ADMIN'
           ? 'Auto-dispatch ran out of available technicians. Pick one below.'
           : 'Everyone nearby is busy right now. Our operations team has been alerted and will assign a technician manually. You can also cancel.'}
+      </p>
+      <p className="mt-2 text-sm text-ink-muted">
+        We searched up to {radiusKm} km
+        {asked > 0 ? ` and asked ${asked} ${asked === 1 ? 'technician' : 'technicians'}` : ''}.
       </p>
     </div>
   );
@@ -380,6 +388,16 @@ function PeoplePanel({ job, role }: { job: Job; role: Role }) {
           ) : (
             <p className="mt-2 text-sm text-ink-muted">Assigned automatically once someone accepts.</p>
           )}
+        </div>
+      )}
+      {tech?.location && (
+        <div className="mt-4 border-t border-line pt-3">
+          <LocationLine
+            lat={tech.location.lat}
+            lng={tech.location.lng}
+            updatedAt={tech.location.updatedAt}
+            label={role === 'TECHNICIAN' ? 'Your location' : "Technician's location"}
+          />
         </div>
       )}
       {role !== 'CUSTOMER' && (
@@ -580,11 +598,112 @@ function ReviewForm({ job, onDone }: { job: Job; onDone: (j: Job) => void }) {
   );
 }
 
+const OUTCOME_LABEL: Record<DispatchAttempt['outcome'], string> = {
+  OFFERED: 'Offer sent',
+  NO_CANDIDATES: 'Nobody free',
+  RADIUS_EXPANDED: 'Search widened',
+  EXHAUSTED: 'Sent to admin queue',
+  MANUAL_OFFER: 'Admin sent offer',
+  MANUAL_ASSIGN: 'Admin assigned',
+};
+
+/** Every dispatch decision with the technicians considered and why each was passed over. */
+function DispatchLogPanel({ job }: { job: Job }) {
+  const [open, setOpen] = useState<number | null>(null);
+  const attempts = job.dispatchAttempts ?? [];
+  const offers = job.dispatchLog ?? [];
+
+  return (
+    <section className="panel p-5">
+      <h2 className="font-display text-xl font-semibold">Dispatch log</h2>
+      <p className="text-sm text-ink-muted">
+        {job.dispatchRounds} {job.dispatchRounds === 1 ? 'offer' : 'offers'} made; current radius {job.dispatch.radiusKm} km.
+      </p>
+      {attempts.length === 0 ? (
+        <p className="mt-3 text-sm text-ink-muted">No dispatch attempts recorded for this job.</p>
+      ) : (
+        <ol className="mt-3 space-y-2">
+          {attempts.map((a, i) => (
+            <li key={`${a.at}-${i}`} className="rounded-panel border border-line p-2.5 text-sm">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <p>
+                  <span className="font-semibold">{OUTCOME_LABEL[a.outcome]}</span>{' '}
+                  <span className="text-ink-muted">within {a.radiusKm} km</span>
+                </p>
+                <span className="num text-xs text-ink-muted">{formatTime(a.at)}</span>
+              </div>
+              {a.note && <p className="text-ink-soft">{a.note}</p>}
+              {a.candidates.length > 0 && (
+                <>
+                  <button className="mt-1 text-xs font-semibold text-route hover:underline" onClick={() => setOpen(open === i ? null : i)}>
+                    {open === i ? 'Hide' : 'Show'} {a.candidates.length} technicians considered
+                  </button>
+                  {open === i && (
+                    <table className="data-table mt-1 text-xs">
+                      <tbody>
+                        {a.candidates.map(c => (
+                          <tr key={c.technicianId}>
+                            <td>{c.name}</td>
+                            <td className="num">{c.distanceKm} km</td>
+                            <td className="num">~{c.etaMinutes} min</td>
+                            <td className={c.reason ? 'text-ink-muted' : 'font-semibold text-go'}>{c.reason ?? 'eligible'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </>
+              )}
+            </li>
+          ))}
+        </ol>
+      )}
+      {offers.length > 0 && (
+        <>
+          <h3 className="mt-4 text-sm font-semibold">Offers</h3>
+          <table className="data-table mt-1">
+            <thead>
+              <tr>
+                <th>Round</th>
+                <th>Technician</th>
+                <th>Distance</th>
+                <th>Outcome</th>
+              </tr>
+            </thead>
+            <tbody>
+              {offers.map(o => (
+                <tr key={`${o.round}-${o.offeredAt}`}>
+                  <td className="num">{o.round}<span className="block text-xs text-ink-muted">{o.radiusKm} km</span></td>
+                  <td>{o.technicianName}</td>
+                  <td className="num">{o.distanceKm} km, ~{o.etaMinutes} min</td>
+                  <td>
+                    {o.status.charAt(0) + o.status.slice(1).toLowerCase()}
+                    {o.respondedAt && (
+                      <span className="block text-xs text-ink-muted">
+                        after {duration((new Date(o.respondedAt).getTime() - new Date(o.offeredAt).getTime()) / 1000)}
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+    </section>
+  );
+}
+
+type ManualAction = 'offer' | 'assign';
+
 function AssignPanel({ job, onAssigned }: { job: Job; onAssigned: (j: Job) => void }) {
   const toast = useToast();
   const [candidates, setCandidates] = useState<Candidate[] | null>(null);
-  const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pick, setPick] = useState<{ c: Candidate; action: ManualAction; guard: AssignmentGuard } | null>(null);
+  const [acknowledged, setAcknowledged] = useState(false);
+  const [typed, setTyped] = useState('');
+  const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -599,18 +718,38 @@ function AssignPanel({ job, onAssigned }: { job: Job; onAssigned: (j: Job) => vo
     load();
   }, [load]);
 
-  const assign = async (c: Candidate) => {
-    setBusyId(c.id);
+  const open = (c: Candidate, action: ManualAction) => {
+    setPick({ c, action, guard: c.guard });
+    setAcknowledged(false);
+    setTyped('');
+  };
+
+  const confirm = async () => {
+    if (!pick) return;
+    setBusy(true);
+    const confirmation = { acknowledgeWarning: acknowledged, confirmText: typed };
     try {
-      onAssigned(await adminApi.assign(job.id, c.id));
-      toast(`Assigned to ${c.name}.`, 'success');
+      const updated =
+        pick.action === 'offer'
+          ? await adminApi.offer(job.id, pick.c.id, confirmation)
+          : await adminApi.assign(job.id, pick.c.id, confirmation);
+      onAssigned(updated);
+      toast(pick.action === 'offer' ? `Offer sent to ${pick.c.name}.` : `Assigned to ${pick.c.name}.`, 'success');
+      setPick(null);
     } catch (err) {
+      // The server re-checks the guard; show its latest figures if they changed.
+      const guard = axios.isAxiosError(err) ? (err.response?.data as ApiError | undefined)?.details?.guard : undefined;
+      if (guard) setPick(p => (p ? { ...p, guard } : p));
       toast(errorMessage(err), 'error');
       load();
     } finally {
-      setBusyId(null);
+      setBusy(false);
     }
   };
+
+  const needsAck = pick && pick.guard.level !== 'ok';
+  const needsTyped = pick?.guard.level === 'confirm';
+  const ready = pick && (!needsAck || acknowledged) && (!needsTyped || typed.trim().toUpperCase() === 'ASSIGN');
 
   return (
     <section className="panel p-5">
@@ -621,8 +760,9 @@ function AssignPanel({ job, onAssigned }: { job: Job; onAssigned: (j: Job) => vo
         </button>
       </div>
       <p className="mt-1 text-sm text-ink-muted">
-        Verified technicians with this skill, nearest first.
-        {job.status === 'MATCHED' && ' Assigning withdraws the open offer.'}
+        Verified technicians with this skill, nearest first. <strong>Send offer</strong> gives them the usual
+        60-second offer; <strong>Assign directly</strong> is for someone you have already spoken to.
+        {job.status === 'MATCHED' && ' Either one withdraws the open offer.'}
       </p>
       {error && <div className="mt-3"><ErrorNotice message={error} onRetry={load} /></div>}
       {!candidates ? (
@@ -631,11 +771,11 @@ function AssignPanel({ job, onAssigned }: { job: Job; onAssigned: (j: Job) => vo
         <p className="mt-3 text-sm">No verified technician has this skill yet.</p>
       ) : (
         <div className="mt-3 overflow-x-auto">
-          <table className="data-table">
+          <table className="data-table min-w-[620px]">
             <thead>
               <tr>
                 <th>Technician</th>
-                <th>Distance</th>
+                <th>Distance and ETA</th>
                 <th>State</th>
                 <th />
               </tr>
@@ -645,22 +785,30 @@ function AssignPanel({ job, onAssigned }: { job: Job; onAssigned: (j: Job) => vo
                 <tr key={c.id}>
                   <td>
                     <p className="font-semibold">{c.name}</p>
-                    <p className="text-xs text-ink-muted">
-                      ★ {rating(c.ratingAvg)}, {c.completedJobs} {c.completedJobs === 1 ? 'job' : 'jobs'} done
+                    <p className="num text-xs text-ink-muted">
+                      {c.location.lat.toFixed(5)}, {c.location.lng.toFixed(5)}
                     </p>
                   </td>
-                  <td className="num">{c.distanceKm} km<span className="block text-xs text-ink-muted">~{c.etaMinutes} min</span></td>
+                  <td className="num">
+                    <span className={c.guard.level === 'confirm' ? 'font-semibold text-alert' : c.guard.level === 'warn' ? 'font-semibold text-signal-deep' : ''}>
+                      {c.distanceKm} km, ~{c.etaMinutes} min
+                    </span>
+                    {c.guard.locationAgeMins != null && c.guard.locationAgeMins > 10 && (
+                      <span className="block text-xs text-alert">location {c.guard.locationAgeMins} min old</span>
+                    )}
+                  </td>
                   <td className="text-xs">
                     {c.busy ? 'On a job' : c.hasOtherOffer ? 'Answering an offer' : c.isOnline ? 'Online, free' : 'Offline'}
                   </td>
-                  <td className="text-right">
-                    <button
-                      className="btn-primary px-3 py-1.5"
-                      disabled={!c.assignable || !!busyId}
-                      onClick={() => assign(c)}
-                    >
-                      {busyId === c.id ? <Spinner className="h-4 w-4" /> : 'Assign'}
-                    </button>
+                  <td>
+                    <div className="flex justify-end gap-2">
+                      <button className="btn-primary px-3 py-1.5" disabled={!c.offerable || busy} onClick={() => open(c, 'offer')}>
+                        Send offer
+                      </button>
+                      <button className="btn-secondary px-3 py-1.5" disabled={!c.assignable || busy} onClick={() => open(c, 'assign')}>
+                        Assign directly
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -668,6 +816,58 @@ function AssignPanel({ job, onAssigned }: { job: Job; onAssigned: (j: Job) => vo
           </table>
         </div>
       )}
+
+      <Modal
+        open={!!pick}
+        title={pick ? `${pick.action === 'offer' ? 'Send offer to' : 'Assign directly to'} ${pick.c.name}?` : ''}
+        onClose={() => setPick(null)}
+      >
+        {pick && (
+          <div className="space-y-4 text-sm">
+            <dl className="grid grid-cols-2 gap-3">
+              <div className="rounded-panel bg-paper px-3 py-2">
+                <dt className="text-xs text-ink-muted">Distance</dt>
+                <dd className="num font-display text-2xl font-semibold">{pick.guard.distanceKm} km</dd>
+              </div>
+              <div className="rounded-panel bg-paper px-3 py-2">
+                <dt className="text-xs text-ink-muted">Time to arrive</dt>
+                <dd className="num font-display text-2xl font-semibold">~{pick.guard.etaMinutes} min</dd>
+              </div>
+            </dl>
+            <LocationLine lat={pick.c.location.lat} lng={pick.c.location.lng} updatedAt={pick.c.location.updatedAt} label="Technician's last location" />
+            {pick.guard.level !== 'ok' && (
+              <div className={`rounded-panel border px-3 py-2 ${pick.guard.level === 'confirm' ? 'border-alert/40 bg-alert-soft' : 'border-signal bg-signal-soft'}`} role="alert">
+                <p className="font-semibold">
+                  {pick.guard.level === 'confirm' ? 'Far outside emergency limits' : 'Outside emergency limits'}
+                </p>
+                <ul className="mt-1 list-disc pl-5">
+                  {pick.guard.reasons.map(r => (
+                    <li key={r}>{r}</li>
+                  ))}
+                </ul>
+                <label className="mt-2 flex items-center gap-2">
+                  <input type="checkbox" checked={acknowledged} onChange={e => setAcknowledged(e.target.checked)} className="h-4 w-4 accent-ink" />
+                  I understand and still want to continue
+                </label>
+                {pick.guard.level === 'confirm' && (
+                  <div className="mt-2">
+                    <label htmlFor="typed-confirm" className="label">Type ASSIGN to confirm</label>
+                    <input id="typed-confirm" className="field" value={typed} onChange={e => setTyped(e.target.value)} autoComplete="off" />
+                  </div>
+                )}
+              </div>
+            )}
+            <div className="flex justify-end gap-2">
+              <button className="btn-secondary" onClick={() => setPick(null)}>
+                Back
+              </button>
+              <button className="btn-primary" disabled={!ready || busy} onClick={confirm}>
+                {busy ? <Spinner className="h-4 w-4" /> : pick.action === 'offer' ? 'Send offer' : 'Assign directly'}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </section>
   );
 }

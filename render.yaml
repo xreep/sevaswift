@@ -45,6 +45,14 @@ services:
         value: '3'
       - key: REPORT_TIMEZONE
         value: Asia/Kolkata
+      # Search widens 15 -> 25 -> 40 km; locations older than 10 minutes are not dispatched.
+      - key: DISPATCH_EXPANSION_KM
+        value: '25,40'
+      - key: LOCATION_STALE_MINUTES
+        value: '10'
+      # Keeps the seeded demo technicians on duty (they are labelled "Simulated demo unit").
+      - key: DEMO_FLEET_SIMULATION
+        value: 'true'
       # Optional: road travel times (openrouteservice.org) and real email delivery.
       - key: ORS_API_KEY
         sync: false

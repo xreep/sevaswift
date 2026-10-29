@@ -4,6 +4,7 @@ import type { Role } from '@prisma/client';
 import { createApp } from '@/app';
 import { config } from '@/config/index';
 import { prisma } from '@/common/prisma';
+import { getClock } from '@/common/utils/clock';
 
 const app = createApp();
 const DOMAIN = '@availability.test';
@@ -31,6 +32,7 @@ async function makeTech(key: string, km: number, opts: { online?: boolean; skill
       userId: user.id,
       verificationStatus: 'VERIFIED',
       isOnline: opts.online ?? true,
+      locationUpdatedAt: new Date(getClock().now()),
       lastLat: SPOT.lat + km * KM,
       lastLng: SPOT.lng,
       ...(opts.skill !== false && { skills: { create: { serviceId: SERVICE_ID } } }),

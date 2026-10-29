@@ -2,14 +2,21 @@ import type { JobStatus, Prisma } from '@prisma/client';
 import { OfferStatus, UserStatus, VerificationStatus } from '@prisma/client';
 import { prisma } from '../../common/prisma';
 import { events } from '../../common/events/index';
-import { badRequest, conflict, forbidden, notFound } from '../../common/errors/index';
+import { AppError, badRequest, conflict, forbidden, notFound } from '../../common/errors/index';
+import { config } from '../../config/index';
 import { haversineKm } from '../../common/geo/index';
 import { getClock } from '../../common/utils/clock';
 import { estimateTravel } from '../dispatch/travel';
-import { DISPATCH_LOCK_KEY, cancelOpenOffers, rejectOffer } from '../dispatch/dispatch.service';
+import {
+  DISPATCH_LOCK_KEY,
+  cancelOpenOffers,
+  logAttempt,
+  offerToTechnician,
+} from '../dispatch/dispatch.service';
 import { ACTIVE_JOB_STATUSES, publishStatusChange, transitionJob } from '../jobs/lifecycle';
 import { getJob } from '../jobs/jobs.service';
 import { performanceFor } from '../technicians/performance';
+import { isDemoFleetEmail, takeOffline } from '../technicians/technicians.service';
 import type { ListTechniciansQuery, ListUsersQuery, VerificationInput } from './admin.dto';
 
 const OPEN_STATUSES: JobStatus[] = ['CREATED', 'MATCHED', ...ACTIVE_JOB_STATUSES];
@@ -30,31 +37,6 @@ async function activeJobsByTechnician(userIds?: string[]) {
     select: { id: true, technicianId: true, status: true },
   });
   return new Map(jobs.map(j => [j.technicianId as string, { id: j.id, status: j.status }]));
-}
-
-/** Records an online → offline switch made on the technician's behalf. */
-async function forceOffline(profile: { id: string; userId: string; isOnline: boolean }) {
-  if (!profile.isOnline) return;
-  await prisma.$transaction([
-    prisma.technicianProfile.update({ where: { id: profile.id }, data: { isOnline: false } }),
-    prisma.availabilityLog.create({
-      data: { technicianId: profile.id, isOnline: false, at: now() },
-    }),
-  ]);
-  events.publish('technician.availability', {
-    technicianUserId: profile.userId,
-    isOnline: false,
-  });
-}
-
-async function declinePendingOffers(profileId: string, userId: string) {
-  const open = await prisma.jobOffer.findMany({
-    where: { technicianId: profileId, status: OfferStatus.PENDING },
-    select: { jobId: true },
-  });
-  for (const offer of open) {
-    await rejectOffer(offer.jobId, userId);
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -140,7 +122,7 @@ export async function liveMap() {
         lastLng: true,
         locationUpdatedAt: true,
         ratingAvg: true,
-        user: { select: { name: true, phone: true } },
+        user: { select: { name: true, phone: true, email: true } },
         skills: { select: { service: { select: { name: true } } } },
       },
     }),
@@ -180,6 +162,7 @@ export async function liveMap() {
       locationUpdatedAt: t.locationUpdatedAt,
       skills: t.skills.map(s => s.service.name),
       activeJobId: activeByTech.get(t.userId) ?? null,
+      simulated: isDemoFleetEmail(t.user.email),
     })),
     jobs: jobs.map(j => ({
       id: j.id,
@@ -242,6 +225,7 @@ export async function listTechnicians(query: ListTechniciansQuery, onlyUserId?: 
     phone: p.user.phone,
     accountStatus: p.user.status,
     joinedAt: p.user.createdAt,
+    simulated: isDemoFleetEmail(p.user.email),
     verificationStatus: p.verificationStatus,
     rejectionReason: p.rejectionReason,
     isOnline: p.isOnline,
@@ -274,8 +258,7 @@ export async function setVerification(technicianUserId: string, input: Verificat
         'This technician is on an active job; wait for it to finish or cancel it first'
       );
     }
-    await declinePendingOffers(profile.id, technicianUserId);
-    await forceOffline(profile);
+    await takeOffline(technicianUserId);
   }
 
   await prisma.technicianProfile.update({
@@ -354,8 +337,7 @@ export async function setUserStatus(
       );
     }
     if (user.technicianProfile) {
-      await declinePendingOffers(user.technicianProfile.id, userId);
-      await forceOffline(user.technicianProfile);
+      await takeOffline(userId);
     }
   }
 
@@ -380,10 +362,95 @@ export async function setUserStatus(
 // Manual assignment
 // ---------------------------------------------------------------------------
 
+export type GuardLevel = 'ok' | 'warn' | 'confirm';
+
+export interface AssignmentGuard {
+  level: GuardLevel;
+  distanceKm: number;
+  etaMinutes: number;
+  locationAgeMins: number | null;
+  reasons: string[];
+}
+
+/**
+ * How risky a manual assignment is for an emergency: a warning beyond the
+ * dispatch radius or a 45-minute ETA (or a stale location), and a typed
+ * confirmation beyond 40 km or 90 minutes. Never silently a 40-hour ETA.
+ */
+export function assignmentGuard(
+  distanceKm: number,
+  etaMinutes: number,
+  locationUpdatedAt: Date | null
+): AssignmentGuard {
+  const { warnKm, warnEtaMins, confirmKm, confirmEtaMins } = config.dispatch.manualGuard;
+  const ageMs = locationUpdatedAt ? getClock().now() - locationUpdatedAt.getTime() : null;
+  const reasons: string[] = [];
+  let level: GuardLevel = 'ok';
+  const raise = (to: GuardLevel) => {
+    if (to === 'confirm' || (to === 'warn' && level === 'ok')) level = to;
+  };
+
+  if (distanceKm > confirmKm) {
+    raise('confirm');
+    reasons.push(`${distanceKm} km away, beyond the ${confirmKm} km limit for emergencies`);
+  } else if (distanceKm > warnKm) {
+    raise('warn');
+    reasons.push(`${distanceKm} km away, outside the ${warnKm} km emergency radius`);
+  }
+  if (etaMinutes > confirmEtaMins) {
+    raise('confirm');
+    reasons.push(`about ${etaMinutes} min to arrive, beyond the ${confirmEtaMins} min limit`);
+  } else if (etaMinutes > warnEtaMins) {
+    raise('warn');
+    reasons.push(`about ${etaMinutes} min to arrive, slower than ${warnEtaMins} min`);
+  }
+  if (ageMs === null) {
+    raise('warn');
+    reasons.push('location has never been shared');
+  } else if (ageMs > config.dispatch.locationStaleMs) {
+    raise('warn');
+    reasons.push(`location is ${Math.round(ageMs / 60_000)} min old`);
+  }
+  return {
+    level,
+    distanceKm,
+    etaMinutes,
+    locationAgeMins: ageMs === null ? null : Math.round(ageMs / 60_000),
+    reasons,
+  };
+}
+
+export interface AssignmentConfirmation {
+  acknowledgeWarning?: boolean;
+  confirmText?: string;
+}
+
+function enforceGuard(guard: AssignmentGuard, confirmation: AssignmentConfirmation) {
+  if (guard.level === 'confirm' && confirmation.confirmText?.trim().toUpperCase() !== 'ASSIGN') {
+    throw new AppError(
+      409,
+      'TYPED_CONFIRMATION_REQUIRED',
+      'This assignment is far outside emergency limits. Type ASSIGN to confirm.',
+      undefined,
+      { guard }
+    );
+  }
+  if (guard.level === 'warn' && !confirmation.acknowledgeWarning) {
+    throw new AppError(
+      409,
+      'CONFIRMATION_REQUIRED',
+      'This assignment is outside emergency limits. Confirm to continue.',
+      undefined,
+      { guard }
+    );
+  }
+}
+
 /**
  * Technicians an admin can hand a job to: verified, active and skilled in the
- * service, nearest first. Includes offline and busy ones (flagged) so the admin
- * sees the whole picture; only idle ones can be assigned.
+ * service, nearest first, each with distance, ETA, location age and the
+ * guard level an assignment would trigger. Offline, busy and stale ones are
+ * included (flagged) so the admin sees the whole picture.
  */
 export async function jobCandidates(jobId: string) {
   const job = await prisma.jobRequest.findUnique({
@@ -431,6 +498,7 @@ export async function jobCandidates(jobId: string) {
   return nearest.map(({ p }, i) => {
     const otherOffer = p.jobOffers.find(o => o.jobId !== job.id);
     const busy = active.has(p.userId);
+    const guard = assignmentGuard(travel[i].distanceKm, travel[i].etaMinutes, p.locationUpdatedAt);
     return {
       id: p.userId,
       name: p.user.name,
@@ -447,26 +515,24 @@ export async function jobCandidates(jobId: string) {
       etaMinutes: travel[i].etaMinutes,
       busy,
       hasOtherOffer: !!otherOffer,
+      // Direct assignment works for anyone free; an offer needs them online to see it.
       assignable: !busy && !otherOffer,
+      offerable: !busy && !otherOffer && p.isOnline,
+      guard,
     };
   });
 }
 
-/**
- * Assigns a job directly to a technician: for jobs nobody accepted (EXPIRED)
- * or to override an open offer (MATCHED). Runs under the dispatch lock so the
- * engine cannot offer the technician another job at the same moment.
- */
-export async function assignJob(adminId: string, jobId: string, technicianUserId: string) {
+/** Loads the job, the technician and the guard for a manual action; throws on anything invalid. */
+async function prepareManual(jobId: string, technicianUserId: string, allowed: JobStatus[]) {
   const job = await prisma.jobRequest.findUnique({ where: { id: jobId } });
   if (!job) throw notFound('JOB_NOT_FOUND', 'Job not found');
-  if (!ASSIGNABLE.includes(job.status)) {
+  if (!allowed.includes(job.status)) {
     throw conflict(
       'NOT_ASSIGNABLE',
-      'Only jobs waiting for a technician (expired or awaiting acceptance) can be assigned'
+      'Only jobs waiting for a technician (needs assignment or awaiting acceptance) can be assigned'
     );
   }
-
   const tech = await prisma.technicianProfile.findUnique({
     where: { userId: technicianUserId },
     include: { user: { select: { name: true, status: true } } },
@@ -475,6 +541,68 @@ export async function assignJob(adminId: string, jobId: string, technicianUserId
   if (tech.verificationStatus !== 'VERIFIED' || tech.user.status !== 'ACTIVE') {
     throw conflict('TECHNICIAN_UNAVAILABLE', 'Technician must be verified and active');
   }
+  if (tech.lastLat == null || tech.lastLng == null) {
+    throw conflict('NO_LOCATION', 'This technician has never shared a location');
+  }
+  const [travel] = await estimateTravel([{ lat: tech.lastLat, lng: tech.lastLng }], job);
+  const guard = assignmentGuard(travel.distanceKm, travel.etaMinutes, tech.locationUpdatedAt);
+  return { job, tech, travel, guard };
+}
+
+/**
+ * Default manual action: send the technician the normal 60-second offer.
+ * If they decline or let it lapse, auto-dispatch carries on.
+ */
+export async function offerJob(
+  adminId: string,
+  jobId: string,
+  technicianUserId: string,
+  confirmation: AssignmentConfirmation = {}
+) {
+  const { tech, travel, guard } = await prepareManual(jobId, technicianUserId, [
+    'EXPIRED',
+    'MATCHED',
+    'CREATED',
+  ]);
+  if (!tech.isOnline) {
+    throw conflict(
+      'TECHNICIAN_OFFLINE',
+      'This technician is offline and will not see an offer. Assign directly if you have spoken to them.'
+    );
+  }
+  enforceGuard(guard, confirmation);
+  const admin = await prisma.user.findUniqueOrThrow({
+    where: { id: adminId },
+    select: { name: true },
+  });
+  await offerToTechnician(
+    jobId,
+    {
+      technicianId: tech.id,
+      userId: technicianUserId,
+      name: tech.user.name,
+      distanceKm: travel.distanceKm,
+      etaMinutes: travel.etaMinutes,
+    },
+    admin.name
+  );
+  return getJob(jobId, { id: adminId, role: 'ADMIN' });
+}
+
+/**
+ * Override: assigns the job straight to a technician (for example one the
+ * admin has phoned). For EXPIRED jobs or to replace an open offer. Runs under
+ * the dispatch lock so the engine cannot offer the technician another job at
+ * the same moment, and is written to the dispatch log with the admin's name.
+ */
+export async function assignJob(
+  adminId: string,
+  jobId: string,
+  technicianUserId: string,
+  confirmation: AssignmentConfirmation = {}
+) {
+  const { job, tech, travel, guard } = await prepareManual(jobId, technicianUserId, ASSIGNABLE);
+  enforceGuard(guard, confirmation);
   const admin = await prisma.user.findUniqueOrThrow({
     where: { id: adminId },
     select: { name: true },
@@ -515,6 +643,14 @@ export async function assignJob(adminId: string, jobId: string, technicianUserId
     throw conflict('JOB_CHANGED', 'The job was updated by someone else, please refresh');
   }
 
+  await logAttempt(jobId, {
+    radiusKm: job.dispatchRadiusKm,
+    outcome: 'MANUAL_ASSIGN',
+    offeredTechnicianId: technicianUserId,
+    note:
+      `${admin.name} assigned ${tech.user.name} directly, ${travel.distanceKm} km away (~${travel.etaMinutes} min)` +
+      (guard.level !== 'ok' ? `; confirmed despite: ${guard.reasons.join('; ')}` : ''),
+  });
   publishStatusChange(assigned, job.status);
   return getJob(jobId, { id: adminId, role: 'ADMIN' });
 }

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Marker } from 'react-leaflet';
-import type { Job, Service, TechnicianStats } from '../../types';
+import { Marker, useMap } from 'react-leaflet';
+import type { Job, LatLng, Service, TechnicianStats } from '../../types';
 import { errorMessage, jobsApi, servicesApi, technicianApi } from '../../services/api';
 import { useTechnician } from '../../contexts/TechnicianContext';
 import { useSocketEvent } from '../../contexts/SocketContext';
@@ -9,7 +9,10 @@ import { useToast } from '../../contexts/ToastContext';
 import { useNow } from '../../hooks/useNow';
 import { BaseMap, ClickToPick, Recenter, homeIcon, techIcon } from '../../components/map/Map';
 import { ErrorNotice, PageHeader, PageLoader, PriorityTag, Spinner, Stat, StatusBadge } from '../../components/ui';
-import { DEFAULT_CENTER } from '../../lib/geo';
+import LocationLine from '../../components/LocationLine';
+
+/** Whole-country view used until the technician has a real position. */
+const INDIA_CENTER = { lat: 22.5, lng: 79 };
 import { duration, minutes, percent, rating, timeAgo } from '../../lib/format';
 import ServiceIcon from '../../components/ServiceIcon';
 
@@ -24,6 +27,7 @@ export default function TechnicianDashboard() {
   const [skillIds, setSkillIds] = useState<string[]>([]);
   const [savingSkills, setSavingSkills] = useState(false);
   const [toggling, setToggling] = useState(false);
+  const [pending, setPending] = useState<LatLng | null>(null);
 
   const loadWork = useCallback(async () => {
     try {
@@ -182,12 +186,57 @@ export default function TechnicianDashboard() {
               : 'Tap the map to set where you are. Useful for demos or when GPS is unavailable.'}
             {tech.simulating && ' Simulated drive in progress.'}
           </p>
-          <BaseMap center={position ?? DEFAULT_CENTER} zoom={position ? 14 : 11} className="mt-3 h-60">
-            {tech.mode === 'manual' && <ClickToPick onPick={p => tech.placeAt(p)} />}
-            <Recenter point={tech.position} />
+          {/* No silent default: without a position the map shows all of India until you choose. */}
+          <BaseMap
+            center={pending ?? position ?? INDIA_CENTER}
+            zoom={pending || position ? 14 : 5}
+            className="mt-3 h-60"
+          >
+            {tech.mode === 'manual' && <ClickToPick onPick={setPending} />}
+            {/* Each tap zooms in around the spot (country, region, street) so it can be refined. */}
+            <ZoomToPending point={pending} />
+            {!pending && <Recenter point={tech.position} />}
             {position && <Marker position={[position.lat, position.lng]} icon={techIcon('self')} />}
+            {pending && <Marker position={[pending.lat, pending.lng]} icon={techIcon('available')} />}
             {activeJob && <Marker position={[activeJob.location.lat, activeJob.location.lng]} icon={homeIcon(activeJob.priority === 'URGENT')} />}
           </BaseMap>
+
+          {pending ? (
+            <div className="mt-3 rounded-panel border border-signal bg-signal-soft p-3">
+              <LocationLine lat={pending.lat} lng={pending.lng} label="You tapped" />
+              <p className="mt-1 text-xs text-ink-soft">
+                Check the place name before confirming; tap again on the zoomed map to adjust. Jobs are offered by distance from this spot.
+              </p>
+              <div className="mt-2 flex gap-2">
+                <button
+                  className="btn-primary"
+                  onClick={async () => {
+                    await tech.placeAt(pending);
+                    setPending(null);
+                    toast('Location confirmed.', 'success');
+                  }}
+                >
+                  Confirm this location
+                </button>
+                <button className="btn-secondary" onClick={() => setPending(null)}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : position ? (
+            <div className="mt-3">
+              <LocationLine
+                lat={position.lat}
+                lng={position.lng}
+                updatedAt={tech.positionAt ?? profile.location?.updatedAt ?? null}
+                label="Your shared location"
+              />
+            </div>
+          ) : (
+            <p className="mt-3 text-sm font-semibold text-alert">
+              No location shared yet. Use device GPS, or choose Set on map and tap where you are.
+            </p>
+          )}
         </section>
       </div>
 
@@ -276,4 +325,13 @@ function Check({ ok, dark, children }: { ok: boolean; dark: boolean; children: R
       <span className={dark ? 'text-white/85' : ''}>{children}</span>
     </li>
   );
+}
+
+/** Zooms four levels closer to each newly tapped point, up to street level. */
+function ZoomToPending({ point }: { point: LatLng | null }) {
+  const map = useMap();
+  useEffect(() => {
+    if (point) map.setView([point.lat, point.lng], Math.min(map.getZoom() + 4, 16));
+  }, [point?.lat, point?.lng]); // eslint-disable-line react-hooks/exhaustive-deps
+  return null;
 }

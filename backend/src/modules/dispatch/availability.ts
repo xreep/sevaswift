@@ -6,6 +6,7 @@ import { prisma } from '../../common/prisma';
 import { estimateMinutes, haversineKm } from '../../common/geo/index';
 import { authMiddleware } from '../../common/middleware/auth';
 import { validate } from '../../common/middleware/validate';
+import { getClock } from '../../common/utils/clock';
 import { ACTIVE_JOB_STATUSES } from '../jobs/lifecycle';
 
 export const availabilitySchema = z.object({
@@ -35,6 +36,8 @@ export async function availability(query: AvailabilityQuery) {
       user: { status: UserStatus.ACTIVE },
       lastLat: { not: null },
       lastLng: { not: null },
+      // Same freshness rule as dispatch: a stale position cannot be counted on.
+      locationUpdatedAt: { gte: new Date(getClock().now() - config.dispatch.locationStaleMs) },
       ...(query.serviceId && { skills: { some: { serviceId: query.serviceId } } }),
     },
     select: {

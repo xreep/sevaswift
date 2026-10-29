@@ -200,6 +200,11 @@ export const technicianApi = {
   stats: () => api.get<{ stats: TechnicianStats }>('/technicians/me/stats').then(r => r.data.stats),
 };
 
+export interface AssignmentConfirmation {
+  acknowledgeWarning?: boolean;
+  confirmText?: string;
+}
+
 export const adminApi = {
   overview: () =>
     api.get<{ overview: AdminOverview }>('/admin/overview').then(r => r.data.overview),
@@ -229,9 +234,13 @@ export const adminApi = {
     api
       .get<{ candidates: Candidate[] }>(`/admin/jobs/${jobId}/candidates`)
       .then(r => r.data.candidates),
-  assign: (jobId: string, technicianUserId: string) =>
+  assign: (jobId: string, technicianUserId: string, confirmation: AssignmentConfirmation = {}) =>
     api
-      .post<{ job: Job }>(`/admin/jobs/${jobId}/assign`, { technicianUserId })
+      .post<{ job: Job }>(`/admin/jobs/${jobId}/assign`, { technicianUserId, ...confirmation })
+      .then(r => r.data.job),
+  offer: (jobId: string, technicianUserId: string, confirmation: AssignmentConfirmation = {}) =>
+    api
+      .post<{ job: Job }>(`/admin/jobs/${jobId}/offer`, { technicianUserId, ...confirmation })
       .then(r => r.data.job),
   analytics: (days: number) =>
     api

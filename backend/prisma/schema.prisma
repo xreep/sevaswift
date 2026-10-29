@@ -151,6 +151,8 @@ model JobRequest {
   status          JobStatus  @default(CREATED)
   responseTimeSecs Int?      // request created -> technician accepted
   dispatchRounds  Int        @default(0)
+  // Current search radius; widens stepwise (e.g. 15 -> 25 -> 40 km) when nobody accepts.
+  dispatchRadiusKm Float     @default(15)
   createdAt       DateTime   @default(now())
   acceptedAt      DateTime?
   arrivedAt       DateTime?
@@ -159,6 +161,7 @@ model JobRequest {
 
   statusHistory   JobStatusHistory[]
   offers          JobOffer[]
+  dispatchAttempts DispatchAttempt[]
   review          Review?
 
   @@index([customerId])
@@ -187,6 +190,8 @@ model JobOffer {
   technicianId String
   technician   TechnicianProfile @relation(fields: [technicianId], references: [id], onDelete: Cascade)
   round        Int
+  // Search radius the offer was made under.
+  radiusKm     Float    @default(15)
   distanceKm   Float
   etaMinutes   Int
   status       OfferStatus @default(PENDING)
@@ -264,4 +269,22 @@ model Upload {
   createdAt DateTime @default(now())
 
   @@index([ownerId])
+}
+
+// One row per dispatch decision: who was considered, why each was excluded,
+// and what happened. Makes "why did nobody get this job?" answerable.
+model DispatchAttempt {
+  id                  String     @id @default(uuid())
+  jobId               String
+  job                 JobRequest @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  radiusKm            Float
+  // OFFERED | NO_CANDIDATES | RADIUS_EXPANDED | EXHAUSTED | MANUAL_OFFER | MANUAL_ASSIGN
+  outcome             String
+  // [{ technicianId, name, distanceKm, etaMinutes, reason }] — reason is null for eligible ones
+  candidates          Json
+  offeredTechnicianId String?
+  note                String?
+  at                  DateTime
+
+  @@index([jobId, at])
 }

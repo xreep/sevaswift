@@ -7,6 +7,7 @@ import { io as ioClient, type Socket } from 'socket.io-client';
 import { createApp } from '@/app';
 import { config } from '@/config/index';
 import { prisma } from '@/common/prisma';
+import { getClock } from '@/common/utils/clock';
 import { attachRealtime, type Realtime } from '@/modules/realtime/realtime.gateway';
 
 const DOMAIN = '@realtime.test';
@@ -97,6 +98,7 @@ beforeAll(async () => {
       userId: tech.id,
       verificationStatus: 'VERIFIED',
       isOnline: true,
+      locationUpdatedAt: new Date(getClock().now()),
       lastLat: JOB.lat + 5 * KM,
       lastLng: JOB.lng,
       skills: { create: { serviceId: SERVICE_ID } },
@@ -188,6 +190,47 @@ describe('real-time dispatch workflow', () => {
     expect(frame.jobId).toBe(job.id);
     expect(frame.lat).toBeCloseTo(JOB.lat + 2 * KM);
     expect(frame.eta.distanceKm).toBeCloseTo(2, 0);
+  });
+
+  it('shows the customer the technician closing in while on the way', async () => {
+    const job = await raiseJob();
+    await request(server).post(`/api/v1/jobs/${job.id}/accept`).set(auth('tech')).expect(200);
+    await request(server)
+      .post(`/api/v1/jobs/${job.id}/status`)
+      .set(auth('tech'))
+      .send({ status: 'EN_ROUTE' })
+      .expect(200);
+
+    const customerSocket = await connectAs('customer');
+    expect(await subscribe(customerSocket, job.id)).toEqual({ ok: true });
+
+    const frames: { eta: { distanceKm: number; minutes: number } }[] = [];
+    for (const km of [4, 2.5, 1]) {
+      const located = next<{ eta: { distanceKm: number; minutes: number } }>(
+        customerSocket,
+        'job:location'
+      );
+      await request(server)
+        .post('/api/v1/technicians/me/location')
+        .set(auth('tech'))
+        .send({ lat: JOB.lat + km * KM, lng: JOB.lng })
+        .expect(204);
+      frames.push(await located);
+    }
+    const distances = frames.map(f => f.eta.distanceKm);
+    const minutes = frames.map(f => f.eta.minutes);
+    expect(distances).toEqual([4, 2.5, 1]);
+    expect(minutes[0]).toBeGreaterThan(minutes[2]);
+  });
+
+  it('tells the customer when dispatch moves on', async () => {
+    const job = await raiseJob();
+    const customerSocket = await connectAs('customer');
+    expect(await subscribe(customerSocket, job.id)).toEqual({ ok: true });
+
+    const update = next<{ jobId: string }>(customerSocket, 'job:dispatch');
+    await request(server).post(`/api/v1/jobs/${job.id}/reject`).set(auth('tech')).expect(204);
+    expect((await update).jobId).toBe(job.id);
   });
 
   it('refuses job subscriptions from users who cannot see the job', async () => {

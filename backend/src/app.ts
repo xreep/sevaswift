@@ -31,6 +31,8 @@ export function createApp() {
   app.set('trust proxy', 1);
   app.use(
     helmet({
+      // OpenStreetMap blocks tile requests that carry no Referer; send only our origin.
+      referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
       contentSecurityPolicy: {
         directives: {
           // Map tiles come from OpenStreetMap; geocoding from Nominatim.
@@ -40,6 +42,8 @@ export function createApp() {
             'blob:',
             'https://tile.openstreetmap.org',
             'https://*.tile.openstreetmap.org',
+            // Optional keyed tile provider (see VITE_TILE_URL in the frontend).
+            ...config.extraImgHosts,
           ],
           'connect-src': ["'self'", 'https://nominatim.openstreetmap.org', 'wss:', 'ws:'],
         },

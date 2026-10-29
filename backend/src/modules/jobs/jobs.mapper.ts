@@ -27,6 +27,7 @@ export const jobInclude = {
     orderBy: { offeredAt: 'asc' },
     include: { technician: { select: { userId: true, user: { select: { name: true } } } } },
   },
+  dispatchAttempts: { orderBy: { at: 'asc' } },
   review: true,
 } satisfies Prisma.JobRequestInclude;
 
@@ -50,6 +51,12 @@ export function liveEta(status: JobStatus, techLocation: LatLng, jobLocation: La
     distanceKm: Math.round(distanceKm * 10) / 10,
     minutes: estimateMinutes(distanceKm, config.dispatch.averageSpeedKmph),
   };
+}
+
+/** "Ravi Kumar" -> "Ravi K." so the customer knows who is being asked without a full name. */
+function shortName(name: string) {
+  const [first, ...rest] = name.trim().split(/\s+/);
+  return rest.length ? `${first} ${rest[rest.length - 1].charAt(0)}.` : first;
 }
 
 export function toJobDto(job: JobWithRelations, viewer: Viewer) {
@@ -105,6 +112,38 @@ export function toJobDto(job: JobWithRelations, viewer: Viewer) {
           }
         : null,
     dispatchRounds: job.dispatchRounds,
+    // Live search progress: shown to everyone who can see the job.
+    dispatch: {
+      radiusKm: job.dispatchRadiusKm,
+      offersMade: job.offers.length,
+      currentOffer: pendingOffer
+        ? {
+            technicianName: shortName(pendingOffer.technician.user.name),
+            distanceKm: pendingOffer.distanceKm,
+            etaMinutes: pendingOffer.etaMinutes,
+            offeredAt: pendingOffer.offeredAt,
+            expiresAt: pendingOffer.expiresAt,
+          }
+        : null,
+      widened: job.dispatchAttempts
+        .filter(a => a.outcome === 'RADIUS_EXPANDED')
+        .map(a => ({ radiusKm: a.radiusKm, at: a.at })),
+    },
+    dispatchAttempts: isAdmin
+      ? job.dispatchAttempts.map(a => ({
+          at: a.at,
+          radiusKm: a.radiusKm,
+          outcome: a.outcome,
+          note: a.note,
+          candidates: a.candidates as unknown as {
+            technicianId: string;
+            name: string;
+            distanceKm: number;
+            etaMinutes: number;
+            reason: string | null;
+          }[],
+        }))
+      : undefined,
     responseTimeSecs: job.responseTimeSecs,
     createdAt: job.createdAt,
     acceptedAt: job.acceptedAt,
@@ -121,6 +160,7 @@ export function toJobDto(job: JobWithRelations, viewer: Viewer) {
       ? job.offers.map(o => ({
           technicianName: o.technician.user.name,
           round: o.round,
+          radiusKm: o.radiusKm,
           status: o.status,
           distanceKm: o.distanceKm,
           etaMinutes: o.etaMinutes,

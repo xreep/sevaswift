@@ -9,6 +9,7 @@ import { prisma } from '../../common/prisma';
 import { getClock } from '../../common/utils/clock';
 import { badRequest, conflict, unauthorized, notFound } from '../../common/errors/index';
 import { sendMail } from '../../common/mail/index';
+import { takeOffline } from '../technicians/technicians.service';
 import type {
   RegisterInput,
   LoginInput,
@@ -229,14 +230,33 @@ export async function refresh(refreshToken: string | undefined, res: Response) {
   return { accessToken: next.accessToken };
 }
 
-export async function logout(refreshToken: string | undefined, res: Response): Promise<void> {
+/**
+ * Ends the session. A technician who signs out also goes off duty, so nobody
+ * is dispatched to someone who has left the app.
+ */
+export async function logout(
+  refreshToken: string | undefined,
+  res: Response,
+  accessUserId?: string
+): Promise<void> {
+  let userId = accessUserId;
   if (refreshToken) {
+    const stored = await prisma.refreshToken.findUnique({
+      where: { tokenHash: hashToken(refreshToken) },
+      select: { userId: true },
+    });
+    userId = userId ?? stored?.userId;
     await prisma.refreshToken.updateMany({
       where: { tokenHash: hashToken(refreshToken), revokedAt: null },
       data: { revokedAt: new Date(getClock().now()) },
     });
   }
   clearRefreshTokenCookie(res);
+
+  if (userId) {
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
+    if (user?.role === 'TECHNICIAN') await takeOffline(userId);
+  }
 }
 
 export async function verifyEmail(input: VerifyEmailInput): Promise<void> {
