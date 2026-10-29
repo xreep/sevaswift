@@ -8,6 +8,7 @@ import { useToast } from '../contexts/ToastContext';
 import { useNow } from '../hooks/useNow';
 import { rupees } from '../lib/format';
 import { PriorityTag, Spinner } from './ui';
+import ServiceIcon from './ServiceIcon';
 
 function chime() {
   try {
@@ -128,7 +129,8 @@ export default function OfferAlert() {
             <div>
               <p className="text-sm font-semibold text-signal-deep">New job offer</p>
               <h2 id="offer-title" className="font-display text-3xl font-semibold">
-                {offer.service.icon} {offer.service.name}
+                <ServiceIcon service={offer.service} className="mr-2 inline h-8 w-8 align-[-4px]" />
+                {offer.service.name}
               </h2>
             </div>
             <div className="text-right">

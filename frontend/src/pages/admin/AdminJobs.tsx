@@ -5,6 +5,7 @@ import { errorMessage, jobsApi } from '../../services/api';
 import { useSocketEvent } from '../../contexts/SocketContext';
 import { EmptyState, ErrorNotice, PageHeader, PriorityTag, Spinner, StatusBadge, Tabs } from '../../components/ui';
 import { duration, formatDateTime } from '../../lib/format';
+import ServiceIcon from '../../components/ServiceIcon';
 
 type Tab = 'OPEN' | 'EXPIRED' | 'COMPLETED' | 'CANCELLED' | 'ALL';
 const TABS: { value: Tab; label: string }[] = [
@@ -83,7 +84,8 @@ export default function AdminJobs() {
                 <tr key={j.id} className="cursor-pointer hover:bg-paper" onClick={() => navigate(`/jobs/${j.id}`)}>
                   <td>
                     <Link to={`/jobs/${j.id}`} className="font-semibold hover:underline" onClick={e => e.stopPropagation()}>
-                      {j.service.icon} {j.service.name}
+                      <ServiceIcon service={j.service} className="mr-1.5 inline h-4 w-4 align-[-2px]" />
+                      {j.service.name}
                     </Link>{' '}
                     <PriorityTag priority={j.priority} />
                     <span className="block max-w-[16rem] truncate text-xs text-ink-muted">{j.location.address}</span>

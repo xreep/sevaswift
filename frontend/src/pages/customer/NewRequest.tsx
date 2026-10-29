@@ -2,12 +2,13 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Marker } from 'react-leaflet';
 import type { JobPriority, LatLng, Service, Upload } from '../../types';
-import { errorMessage, jobsApi, servicesApi, uploadsApi } from '../../services/api';
+import { availabilityApi, errorMessage, jobsApi, servicesApi, uploadsApi, type Availability } from '../../services/api';
 import { useToast } from '../../contexts/ToastContext';
 import { BaseMap, ClickToPick, Recenter, homeIcon } from '../../components/map/Map';
 import { ErrorNotice, PageHeader, PageLoader, Spinner } from '../../components/ui';
 import { DEFAULT_CENTER, currentPosition, reverseGeocode, searchAddress } from '../../lib/geo';
 import { rupees } from '../../lib/format';
+import ServiceIcon from '../../components/ServiceIcon';
 
 const MAX_PHOTOS = 3;
 const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
@@ -49,6 +50,7 @@ export default function NewRequest() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [coverage, setCoverage] = useState<Availability | null>(null);
 
   useEffect(() => {
     servicesApi
@@ -56,6 +58,25 @@ export default function NewRequest() {
       .then(setServices)
       .catch(err => setLoadError(errorMessage(err)));
   }, []);
+
+  // Show who could take the job before it is sent, for the chosen place and service.
+  useEffect(() => {
+    if (!point || !serviceId) {
+      setCoverage(null);
+      return;
+    }
+    let stale = false;
+    const id = window.setTimeout(() => {
+      availabilityApi
+        .get({ lat: point.lat, lng: point.lng, serviceId })
+        .then(a => !stale && setCoverage(a))
+        .catch(() => !stale && setCoverage(null));
+    }, 300);
+    return () => {
+      stale = true;
+      window.clearTimeout(id);
+    };
+  }, [point, serviceId]);
 
   const pick = async (p: LatLng, label?: string) => {
     setPoint(p);
@@ -176,7 +197,7 @@ export default function NewRequest() {
                 serviceId === s.id ? 'border-ink bg-white' : 'border-line bg-paper hover:border-ink-muted'
               }`}
             >
-              <span className="text-2xl" aria-hidden>{s.icon}</span>
+              <ServiceIcon service={s} className="h-7 w-7" />
               <span className="mt-1 block text-sm font-semibold leading-tight">{s.name}</span>
             </button>
           ))}
@@ -269,6 +290,7 @@ export default function NewRequest() {
           {point && <Marker position={[point.lat, point.lng]} icon={homeIcon(priority === 'URGENT')} />}
         </BaseMap>
         {errors.location && <p className="mt-2 text-sm text-alert">{errors.location}</p>}
+        {coverage && <CoverageNote coverage={coverage} />}
 
         <div className="mt-4">
           <label htmlFor="address" className="label">Address for the technician</label>
@@ -343,5 +365,41 @@ export default function NewRequest() {
         </button>
       </div>
     </form>
+  );
+}
+
+function CoverageNote({ coverage }: { coverage: Availability }) {
+  const { available, onDuty, nearestEtaMins, nearestKm, radiusKm } = coverage;
+  const tone =
+    available > 0
+      ? 'border-go/40 bg-go-soft'
+      : onDuty > 0
+        ? 'border-signal bg-signal-soft'
+        : 'border-alert/40 bg-alert-soft';
+  return (
+    <div className={`mt-3 flex items-start gap-3 rounded-panel border px-4 py-3 text-sm ${tone}`} role="status">
+      <span
+        className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${available > 0 ? 'live-dot bg-go' : onDuty > 0 ? 'bg-signal' : 'bg-alert'}`}
+        aria-hidden
+      />
+      {available > 0 ? (
+        <p>
+          <span className="font-semibold">
+            {available} technician{available > 1 ? 's' : ''} free within {radiusKm} km.
+          </span>{' '}
+          The nearest is {nearestKm} km away, roughly {nearestEtaMins} min to reach you.
+        </p>
+      ) : onDuty > 0 ? (
+        <p>
+          <span className="font-semibold">Everyone nearby is on a job right now.</span> Send the request anyway and our
+          operations team will assign the first technician who frees up.
+        </p>
+      ) : (
+        <p>
+          <span className="font-semibold">No technician with this skill is on duty near this spot.</span> You can still
+          send it and our operations team will assign someone manually.
+        </p>
+      )}
+    </div>
   );
 }

@@ -170,6 +170,21 @@ export const jobsApi = {
     api.post<{ job: Job }>(`/jobs/${id}/review`, data).then(r => r.data.job),
 };
 
+export interface Availability {
+  radiusKm: number | null;
+  onDuty: number;
+  available: number;
+  nearestKm: number | null;
+  nearestEtaMins: number | null;
+}
+
+export const availabilityApi = {
+  get: (params: { lat?: number; lng?: number; serviceId?: string } = {}) =>
+    api
+      .get<{ availability: Availability }>('/availability', { params })
+      .then(r => r.data.availability),
+};
+
 export const technicianApi = {
   me: () => api.get<{ profile: TechnicianProfile }>('/technicians/me').then(r => r.data.profile),
   setAvailability: (isOnline: boolean) =>

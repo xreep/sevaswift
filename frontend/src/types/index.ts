@@ -200,7 +200,7 @@ export interface LiveJob extends LatLng {
   priority: JobPriority;
   address: string;
   createdAt: string;
-  service: { name: string; icon: string | null };
+  service: { id: string; name: string; category: string; icon: string | null };
   customerName: string;
   technicianId: string | null;
 }

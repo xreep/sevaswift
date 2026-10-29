@@ -15,6 +15,7 @@ import techniciansRoutes from './modules/technicians/technicians.routes';
 import usersRoutes from './modules/users/users.routes';
 import uploadsRoutes from './modules/uploads/uploads.routes';
 import adminRoutes from './modules/admin/admin.routes';
+import availabilityRoutes from './modules/dispatch/availability';
 
 const tooManyRequests = {
   status: 429,
@@ -90,6 +91,7 @@ export function createApp() {
   app.use('/api/v1/users', usersRoutes);
   app.use('/api/v1/uploads', uploadsRoutes);
   app.use('/api/v1/admin', adminRoutes);
+  app.use('/api/v1/availability', availabilityRoutes);
 
   // Single-service deployment: serve the built web app and let it handle client routes.
   const dist = config.frontendDist ? path.resolve(config.frontendDist) : null;

@@ -31,6 +31,7 @@ import {
   timeAgo,
 } from '../lib/format';
 import { directionsUrl } from '../lib/geo';
+import ServiceIcon from '../components/ServiceIcon';
 
 type NextStatus = 'EN_ROUTE' | 'ARRIVED' | 'IN_PROGRESS' | 'COMPLETED';
 const NEXT_STEP: Partial<Record<Job['status'], { to: NextStatus; label: string }>> = {
@@ -125,7 +126,8 @@ export default function JobDetail() {
             <PriorityTag priority={job.priority} />
           </div>
           <h1 className="mt-2 font-display text-4xl font-semibold tracking-tight">
-            {job.service.icon} {job.service.name}
+            <ServiceIcon service={job.service} className="mr-2 inline h-9 w-9 align-[-5px]" />
+            {job.service.name}
           </h1>
           <p className="text-sm text-ink-muted">
             Raised {formatDateTime(job.createdAt)}
