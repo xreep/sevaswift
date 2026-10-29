@@ -5,7 +5,7 @@ import { availabilityApi, errorMessage, jobsApi, servicesApi, type Availability 
 import { useAuth } from '../../contexts/AuthContext';
 import { useSocketEvent } from '../../contexts/SocketContext';
 import JobCard from '../../components/JobCard';
-import RouteMotif from '../../components/RouteMotif';
+import { HERO_PHOTO, servicePhoto } from '../../lib/images';
 import ServiceIcon from '../../components/ServiceIcon';
 import { ErrorNotice, PageLoader } from '../../components/ui';
 import { rupees } from '../../lib/format';
@@ -49,35 +49,39 @@ export default function CustomerHome() {
 
   return (
     <div className="space-y-10">
-      <section className="relative -mx-4 -mt-6 overflow-hidden bg-ink text-white sm:mx-0 sm:mt-0 sm:rounded-[10px]">
-        <div className="grid items-center gap-6 p-6 sm:p-10 lg:grid-cols-[1.15fr_1fr]">
-          <div className="relative z-10">
-            <p className="text-white/60">Hello {firstName}</p>
-            <h1 className="mt-2 font-display text-5xl font-bold leading-[0.95] tracking-tight sm:text-6xl">
-              Something broken
-              <br />
-              at home?
-            </h1>
-            <p className="mt-4 max-w-md text-lg text-white/75">
-              Tell us what happened and where. The nearest free technician with the right skill is
-              assigned automatically, usually within a minute.
-            </p>
-            <div className="mt-7 flex flex-wrap items-center gap-4">
-              <Link to="/customer/request" className="btn-signal px-7 py-4 text-lg">
-                Request emergency help
-              </Link>
-              {fleet && fleet.onDuty > 0 && (
-                <p className="flex items-center gap-2 text-sm text-white/80">
-                  <span className="live-dot h-2.5 w-2.5 rounded-full bg-signal" aria-hidden />
-                  <span>
-                    <span className="num font-semibold text-white">{fleet.onDuty}</span> technicians on duty,{' '}
-                    <span className="num font-semibold text-white">{fleet.available}</span> free right now
-                  </span>
-                </p>
-              )}
-            </div>
+      <section className="grid items-center gap-6 lg:grid-cols-[1fr_1.1fr] lg:gap-10">
+        <div className="order-2 lg:order-1">
+          <p className="text-ink-muted">Hello {firstName}</p>
+          <h1 className="mt-1 text-4xl font-bold leading-[1.05] tracking-tight sm:text-5xl">
+            Something broken at home? Help is a tap away.
+          </h1>
+          <p className="mt-4 max-w-md text-lg text-ink-soft">
+            Tell us what happened and where. The nearest free, verified technician with the right
+            skill is assigned automatically, usually within a minute.
+          </p>
+          <div className="mt-6 flex flex-col gap-4 sm:flex-row sm:items-center">
+            <Link to="/customer/request" className="btn-signal px-7 py-4 text-lg">
+              Request help now
+            </Link>
+            {fleet && fleet.onDuty > 0 && (
+              <p className="flex items-center gap-2 text-sm text-ink-soft">
+                <span className="live-dot h-2.5 w-2.5 rounded-full bg-go" aria-hidden />
+                <span>
+                  <span className="num font-semibold text-ink">{fleet.available}</span> technicians free right now
+                </span>
+              </p>
+            )}
           </div>
-          <RouteMotif className="pointer-events-none mx-auto hidden w-full max-w-md lg:block" />
+        </div>
+        <div className="order-1 -mx-4 overflow-hidden sm:mx-0 sm:rounded-2xl lg:order-2">
+          <img
+            src={HERO_PHOTO.src}
+            srcSet={`${HERO_PHOTO.small} 720w, ${HERO_PHOTO.src} 1220w`}
+            sizes="(min-width: 1024px) 55vw, 100vw"
+            alt="A technician with a tool bag arriving at a customer's apartment door"
+            className="aspect-[16/10] w-full object-cover object-[70%_center]"
+            fetchPriority="high"
+          />
         </div>
       </section>
 
@@ -95,25 +99,37 @@ export default function CustomerHome() {
       <section>
         <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
           <h2 className="font-display text-2xl font-semibold">What we fix</h2>
-          <p className="text-sm text-ink-muted">Pick one to start a request. Visit fee is paid to the technician.</p>
+          <p className="text-sm text-ink-muted">Pick one to start. The visit fee is paid to the technician.</p>
         </div>
-        <div className="grid grid-cols-2 gap-px overflow-hidden rounded-[10px] border border-line bg-line sm:grid-cols-3 lg:grid-cols-5">
-          {services.map(s => (
-            <Link
-              key={s.id}
-              to={`/customer/request?service=${s.id}`}
-              className="group flex flex-col gap-3 bg-white p-4 transition-colors hover:bg-signal-soft sm:p-5"
-            >
-              <span className="flex h-11 w-11 items-center justify-center rounded-full bg-paper text-ink transition-colors group-hover:bg-signal">
-                <ServiceIcon service={s} />
-              </span>
-              <span>
-                <span className="block font-semibold leading-tight">{s.name}</span>
-                <span className="text-sm text-ink-muted">from {rupees(s.baseFee)}</span>
-              </span>
-            </Link>
-          ))}
+        <div className="grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-3 lg:grid-cols-5">
+          {services.map(s => {
+            const photo = servicePhoto(s.id);
+            return (
+              <Link key={s.id} to={`/customer/request?service=${s.id}`} className="group block">
+                <span className="block overflow-hidden rounded-xl bg-paper">
+                  {photo ? (
+                    <img
+                      src={photo}
+                      alt=""
+                      loading="lazy"
+                      decoding="async"
+                      width={800}
+                      height={600}
+                      className="aspect-[4/3] w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+                    />
+                  ) : (
+                    <span className="flex aspect-[4/3] w-full items-center justify-center text-ink-soft">
+                      <ServiceIcon service={s} className="h-10 w-10" />
+                    </span>
+                  )}
+                </span>
+                <span className="mt-2 block font-semibold leading-tight group-hover:underline">{s.name}</span>
+                <span className="text-sm text-ink-muted">Visit fee {rupees(s.baseFee)}</span>
+              </Link>
+            );
+          })}
         </div>
+        <p className="mt-4 text-xs text-ink-muted">Photos are illustrative.</p>
       </section>
 
       <section className="grid gap-4 md:grid-cols-3">

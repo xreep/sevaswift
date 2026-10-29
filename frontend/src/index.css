@@ -112,27 +112,8 @@
 .live-dot {
   animation: live-pulse 2s infinite;
 }
-/* Route illustration: the dashes travel towards the customer, whose door pulses. */
-@keyframes motif-dash {
-  to { stroke-dashoffset: -32; }
-}
-@keyframes motif-pulse {
-  0%, 100% { transform: scale(0.8); opacity: 0.9; }
-  50% { transform: scale(1.3); opacity: 0.4; }
-}
-.motif-route {
-  animation: motif-dash 1s linear infinite;
-}
-.motif-pulse {
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: motif-pulse 2.4s ease-in-out infinite;
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .live-dot,
-  .motif-route,
-  .motif-pulse {
+  .live-dot {
     animation: none;
   }
   * {

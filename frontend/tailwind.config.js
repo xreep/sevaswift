@@ -18,7 +18,7 @@ export default {
         alert: { DEFAULT: '#C8322B', soft: '#FBE7E5' },
         route: { DEFAULT: '#2F5DA8', soft: '#E6EEF9' },
       },
-      borderRadius: { panel: '6px' },
+      borderRadius: { panel: '12px' },
     },
   },
   plugins: [],
