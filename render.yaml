@@ -3,8 +3,12 @@
 databases:
   - name: sevaswift-db
     plan: free
+    # Must match the web service region: the internal connection string only works within one region.
+    region: singapore
     databaseName: sevaswift
     user: sevaswift
+    # Reachable only from Render services in this workspace, not the public internet.
+    ipAllowList: []
 
 services:
   - type: web
