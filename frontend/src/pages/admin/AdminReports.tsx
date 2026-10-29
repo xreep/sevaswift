@@ -16,6 +16,7 @@ import { adminApi, errorMessage } from '../../services/api';
 import { useToast } from '../../contexts/ToastContext';
 import { ErrorNotice, PageHeader, PageLoader, Spinner, Stat, Tabs } from '../../components/ui';
 import { duration, minutes, percent, rating } from '../../lib/format';
+import ServiceIcon from '../../components/ServiceIcon';
 
 const SERIES = { requests: '#2F5DA8', completed: '#D99A00' };
 const AXIS = { fontSize: 12, fill: '#6B7686' };
@@ -187,7 +188,7 @@ export default function AdminReports() {
                 {data.byService.length === 0 && <tr><td colSpan={4} className="text-ink-muted">No requests in this period.</td></tr>}
                 {data.byService.map(s => (
                   <tr key={s.serviceId}>
-                    <td>{s.icon} {s.name}</td>
+                    <td><span className="inline-flex items-center gap-2"><ServiceIcon service={{ id: s.serviceId, icon: s.icon }} className="h-4 w-4 text-ink-muted" />{s.name}</span></td>
                     <td className="num">{s.requests}</td>
                     <td className="num">{percent(s.completionRate)}</td>
                     <td className="num">{duration(s.avgResponseSecs)}</td>

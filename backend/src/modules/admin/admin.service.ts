@@ -155,7 +155,7 @@ export async function liveMap() {
         address: true,
         createdAt: true,
         technicianId: true,
-        service: { select: { name: true, icon: true } },
+        service: { select: { id: true, name: true, category: true, icon: true } },
         customer: { select: { name: true } },
       },
       orderBy: { createdAt: 'desc' },

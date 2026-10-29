@@ -4,6 +4,7 @@ import { adminApi, errorMessage, servicesApi } from '../../services/api';
 import { useToast } from '../../contexts/ToastContext';
 import { ErrorNotice, Modal, PageHeader, PageLoader, Spinner } from '../../components/ui';
 import { rupees } from '../../lib/format';
+import ServiceIcon from '../../components/ServiceIcon';
 
 interface Draft {
   id?: string;
@@ -98,7 +99,7 @@ export default function AdminServices() {
             {services.map(s => (
               <tr key={s.id} className={s.isActive ? '' : 'opacity-60'}>
                 <td>
-                  <p className="font-semibold">{s.icon} {s.name}</p>
+                  <p className="flex items-center gap-2 font-semibold"><ServiceIcon service={s} className="h-5 w-5" />{s.name}</p>
                   {s.description && <p className="text-xs text-ink-muted">{s.description}</p>}
                 </td>
                 <td>{s.category}</td>

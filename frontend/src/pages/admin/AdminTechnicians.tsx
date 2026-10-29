@@ -6,6 +6,7 @@ import { useSocketEvent } from '../../contexts/SocketContext';
 import { useToast } from '../../contexts/ToastContext';
 import { EmptyState, ErrorNotice, Modal, PageHeader, Spinner, StatusBadge, Tabs } from '../../components/ui';
 import { duration, formatDateTime, minutes, percent, rating } from '../../lib/format';
+import ServiceIcon from '../../components/ServiceIcon';
 
 type Tab = 'PENDING' | 'VERIFIED' | 'REJECTED' | 'ALL';
 
@@ -144,7 +145,20 @@ export default function AdminTechnicians() {
                       <p className="text-xs text-alert">Not approved: {t.rejectionReason}</p>
                     )}
                   </td>
-                  <td className="max-w-[12rem] text-xs">{t.skills.map(s => `${s.icon ?? ''} ${s.name}`).join(', ') || <span className="text-alert">None</span>}</td>
+                  <td className="max-w-[12rem] text-xs">
+                    {t.skills.length === 0 ? (
+                      <span className="text-alert">None</span>
+                    ) : (
+                      <span className="flex flex-wrap gap-1">
+                        {t.skills.map(s => (
+                          <span key={s.id} className="inline-flex items-center gap-1 rounded-full bg-paper px-2 py-0.5">
+                            <ServiceIcon service={s} className="h-3.5 w-3.5" />
+                            {s.name}
+                          </span>
+                        ))}
+                      </span>
+                    )}
+                  </td>
                   <td className="text-xs">
                     {t.accountStatus === 'SUSPENDED' ? (
                       <span className="font-semibold text-alert">Suspended</span>

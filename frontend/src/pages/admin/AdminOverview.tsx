@@ -9,6 +9,7 @@ import { BaseMap, FitBounds, homeIcon, techIcon } from '../../components/map/Map
 import { ErrorNotice, PageHeader, PageLoader, PriorityTag, Stat, StatusBadge } from '../../components/ui';
 import { DEFAULT_CENTER } from '../../lib/geo';
 import { ACTIVE_STATUSES, duration, formatTime, statusLabel, timeAgo } from '../../lib/format';
+import ServiceIcon from '../../components/ServiceIcon';
 
 interface FeedItem {
   key: string;
@@ -146,7 +147,7 @@ export default function AdminOverview() {
             {jobs.map(j => (
               <Marker key={j.id} position={[j.lat, j.lng]} icon={homeIcon(j.priority === 'URGENT' || j.status === 'EXPIRED')}>
                 <Popup>
-                  <p className="font-semibold">{j.service.icon} {j.service.name}</p>
+                  <p className="font-semibold">{j.service.name}</p>
                   <p>{statusLabel(j.status, 'ADMIN')}, {j.customerName}</p>
                   <Link to={`/jobs/${j.id}`}>Open job</Link>
                 </Popup>
@@ -189,7 +190,7 @@ export default function AdminOverview() {
                 {openJobs.map(j => (
                   <li key={j.id} className="flex items-center justify-between gap-2 py-2">
                     <Link to={`/jobs/${j.id}`} className="min-w-0 hover:underline">
-                      <span className="block truncate text-sm font-semibold">{j.service.icon} {j.service.name}</span>
+                      <span className="flex items-center gap-1.5 truncate text-sm font-semibold"><ServiceIcon service={j.service} className="h-4 w-4 shrink-0" />{j.service.name}</span>
                       <span className="block text-xs text-ink-muted">{timeAgo(j.createdAt, now)}</span>
                     </Link>
                     <StatusBadge status={j.status} role="ADMIN" />

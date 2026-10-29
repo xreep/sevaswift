@@ -11,6 +11,7 @@ import { BaseMap, ClickToPick, Recenter, homeIcon, techIcon } from '../../compon
 import { ErrorNotice, PageHeader, PageLoader, PriorityTag, Spinner, Stat, StatusBadge } from '../../components/ui';
 import { DEFAULT_CENTER } from '../../lib/geo';
 import { duration, minutes, percent, rating, timeAgo } from '../../lib/format';
+import ServiceIcon from '../../components/ServiceIcon';
 
 export default function TechnicianDashboard() {
   const tech = useTechnician();
@@ -102,12 +103,17 @@ export default function TechnicianDashboard() {
       )}
 
       <div className="grid gap-5 lg:grid-cols-[1fr_1.3fr]">
-        <section className={`panel p-5 ${profile.isOnline ? 'border-go' : ''}`}>
+        <section
+          className={`rounded-[10px] border p-5 transition-colors ${
+            profile.isOnline ? 'border-ink bg-ink text-white' : 'border-line bg-white'
+          }`}
+        >
           <div className="flex items-center justify-between gap-4">
             <div>
-              <p className="text-sm text-ink-muted">Availability</p>
-              <p className={`font-display text-4xl font-bold ${profile.isOnline ? 'text-go' : 'text-ink-muted'}`}>
-                {profile.isOnline ? 'Online' : 'Offline'}
+              <p className={`text-sm ${profile.isOnline ? 'text-white/60' : 'text-ink-muted'}`}>Availability</p>
+              <p className="flex items-center gap-3 font-display text-4xl font-bold">
+                {profile.isOnline && <span className="live-dot h-3 w-3 rounded-full bg-signal" aria-hidden />}
+                {profile.isOnline ? 'On duty' : 'Off duty'}
               </p>
             </div>
             <button
@@ -116,29 +122,39 @@ export default function TechnicianDashboard() {
               aria-label="Receive jobs"
               disabled={toggling || (!verified && !profile.isOnline)}
               onClick={toggle}
-              className={`relative h-10 w-20 rounded-full transition-colors ${profile.isOnline ? 'bg-go' : 'bg-line'} disabled:opacity-50`}
+              className={`relative h-11 w-[5.5rem] rounded-full transition-colors ${
+                profile.isOnline ? 'bg-go' : 'bg-line'
+              } disabled:opacity-50`}
             >
               <span
-                className={`absolute top-1 h-8 w-8 rounded-full bg-white shadow transition-all ${profile.isOnline ? 'left-11' : 'left-1'}`}
+                className={`absolute top-1 h-9 w-9 rounded-full bg-white shadow transition-all ${
+                  profile.isOnline ? 'left-[3.25rem]' : 'left-1'
+                }`}
               />
             </button>
           </div>
-          <ul className="mt-4 space-y-1 text-sm">
-            <li className={verified ? 'text-go' : 'text-alert'}>{verified ? '✓ Verified' : '✕ Not verified yet'}</li>
-            <li className={hasSkills ? 'text-go' : 'text-alert'}>
-              {hasSkills ? `✓ ${profile.skills.length} skill${profile.skills.length > 1 ? 's' : ''}` : '✕ Add at least one skill'}
-            </li>
-            <li className={position ? 'text-go' : 'text-alert'}>
+          <p className={`mt-2 text-sm ${profile.isOnline ? 'text-white/70' : 'text-ink-muted'}`}>
+            {profile.isOnline
+              ? activeJob
+                ? 'You will not get new offers until the current job is complete.'
+                : 'New jobs nearby pop up here with a sound. Keep this tab open.'
+              : verified
+                ? 'Switch on to start receiving emergency jobs near you.'
+                : 'You can go on duty once an admin verifies your account.'}
+          </p>
+          <ul className={`mt-4 grid gap-1.5 border-t pt-4 text-sm ${profile.isOnline ? 'border-white/10' : 'border-line'}`}>
+            <Check ok={verified} dark={profile.isOnline}>{verified ? 'Verified by admin' : 'Not verified yet'}</Check>
+            <Check ok={hasSkills} dark={profile.isOnline}>
+              {hasSkills ? `${profile.skills.length} skill${profile.skills.length > 1 ? 's' : ''} selected` : 'Add at least one skill'}
+            </Check>
+            <Check ok={!!position} dark={profile.isOnline}>
               {tech.position
-                ? '✓ Location shared'
+                ? 'Location shared'
                 : position
-                  ? `✓ Last location ${timeAgo(profile.location?.updatedAt ?? null, now)}`
-                  : '✕ Share your location'}
-            </li>
+                  ? `Last location ${timeAgo(profile.location?.updatedAt ?? null, now)}`
+                  : 'Share your location'}
+            </Check>
           </ul>
-          {profile.isOnline && activeJob && (
-            <p className="mt-3 text-sm text-ink-muted">You will not get new offers until the current job is complete.</p>
-          )}
         </section>
 
         <section className="panel p-5">
@@ -179,7 +195,7 @@ export default function TechnicianDashboard() {
         <h2 className="mb-3 font-display text-2xl font-semibold">Current job</h2>
         {activeJob ? (
           <Link to={`/jobs/${activeJob.id}`} className="panel flex flex-wrap items-center gap-4 border-l-4 border-l-signal p-5 hover:border-ink-muted">
-            <span className="text-3xl" aria-hidden>{activeJob.service.icon}</span>
+            <span className="flex h-12 w-12 items-center justify-center rounded-panel bg-signal-soft text-ink"><ServiceIcon service={activeJob.service} className="h-7 w-7" /></span>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <p className="font-semibold">{activeJob.service.name}</p>
@@ -235,7 +251,7 @@ export default function TechnicianDashboard() {
                   onChange={() => setSkillIds(ids => (on ? ids.filter(i => i !== s.id) : [...ids, s.id]))}
                   className="h-4 w-4 accent-ink"
                 />
-                <span aria-hidden>{s.icon}</span>
+                <ServiceIcon service={s} className="h-5 w-5 shrink-0" />
                 <span className="font-semibold leading-tight">{s.name}</span>
               </label>
             );
@@ -243,5 +259,21 @@ export default function TechnicianDashboard() {
         </div>
       </section>
     </div>
+  );
+}
+
+function Check({ ok, dark, children }: { ok: boolean; dark: boolean; children: React.ReactNode }) {
+  return (
+    <li className="flex items-center gap-2">
+      <span
+        className={`flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-bold ${
+          ok ? 'bg-go text-white' : 'bg-alert text-white'
+        }`}
+        aria-hidden
+      >
+        {ok ? '✓' : '!'}
+      </span>
+      <span className={dark ? 'text-white/85' : ''}>{children}</span>
+    </li>
   );
 }

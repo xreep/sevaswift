@@ -1,12 +1,13 @@
 import { Link } from 'react-router-dom';
 import { Logo } from './Layout';
+import RouteMotif from './RouteMotif';
 
 /** Two-column frame for sign-in pages: the promise on the left, the form on the right. */
 export default function AuthShell({ title, subtitle, children }: { title: string; subtitle?: React.ReactNode; children: React.ReactNode }) {
   return (
     <div className="grid min-h-screen lg:grid-cols-[1.1fr_1fr]">
-      <aside className="relative hidden overflow-hidden bg-ink p-12 text-white lg:flex lg:flex-col lg:justify-between">
-        <Logo className="[&_rect]:fill-white [&_span]:text-white" />
+      <aside className="relative hidden gap-8 overflow-hidden bg-ink p-10 text-white lg:flex lg:flex-col lg:justify-between xl:p-12">
+        <Logo onDark />
         <div>
           <p className="font-display text-6xl font-bold leading-[0.95] tracking-tight">
             Burst pipe at 2 a.m.?
@@ -17,15 +18,13 @@ export default function AuthShell({ title, subtitle, children }: { title: string
             Raise an emergency request and the nearest available verified technician is assigned
             automatically. Then follow them to your door on a live map.
           </p>
+          <RouteMotif className="mt-8 h-auto max-h-[36vh] w-full max-w-lg" />
         </div>
         <ul className="grid grid-cols-3 gap-6 text-sm text-white/70">
           <li><span className="block font-display text-3xl font-semibold text-white">Auto</span>nearest-technician dispatch</li>
           <li><span className="block font-display text-3xl font-semibold text-white">Live</span>location and ETA</li>
           <li><span className="block font-display text-3xl font-semibold text-white">24/7</span>plumbing, electrical, AC</li>
         </ul>
-        <svg className="pointer-events-none absolute -right-24 top-1/3 h-[420px] w-[420px] opacity-[0.07]" viewBox="0 0 32 32" aria-hidden>
-          <path d="M18 4 9 18h6l-2 10 10-15h-6z" fill="#FFB000" />
-        </svg>
       </aside>
       <section className="flex items-center justify-center bg-paper px-4 py-12 sm:px-8">
         <div className="w-full max-w-md">
