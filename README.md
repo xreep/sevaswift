@@ -1,215 +1,152 @@
 # SevaSwift — Emergency Home Services Auto-Dispatch System
 
-On-demand emergency home services (plumbing, electrical, AC repair) with Uber-style
-auto-dispatch: the system scores available technicians by distance, skill, rating and
-load, then assigns the best match instantly. Live tracking, ETA, and an admin
-operations dashboard included.
+On-demand emergency home services (plumbing, electrical, AC, appliances and more). A customer
+raises a request and the system offers it to the **fastest-arriving available technician** with
+the right skill. Offers that aren't answered within a minute move on to the next technician
+automatically. Customers then follow the technician live on a map with an ETA, and admins run
+the whole operation from a real-time dashboard.
 
-**Stack:** Node.js 20 + Express 5 + TypeScript · PostgreSQL 16 + Prisma · Socket.IO ·
-React 18 + Vite + Tailwind · Leaflet + OpenStreetMap
+**Stack:** Node.js 20, Express 5, TypeScript, PostgreSQL 16 with Prisma, Socket.IO,
+React 18 with Vite and Tailwind, and Leaflet with OpenStreetMap (maps and geocoding, no API key needed).
 
-## Docs
-- Design spec: `docs/superpowers/specs/2026-10-07-dispatch-design.md`
-- Phase 1 plan: `docs/superpowers/plans/2026-10-07-phase-1-foundation.md`
-- OpenCode handoff: `HANDOFF-opencode.md`
+## PRD coverage
 
-## Prerequisites
-- Node.js 20 LTS
-- Docker & Docker Compose
-- pnpm (or npm/yarn)
+| PRD requirement | Where it lives |
+|---|---|
+| Secure login for Customer / Technician / Admin, RBAC | JWT access tokens + rotating httpOnly refresh cookie, `requireRole` on every route, role-guarded pages |
+| Profile management | `/profile`: name, phone, password change (signs out other sessions) |
+| Emergency request: category, GPS/manual location, description, photos, priority | `/customer/request`: GPS, address search (Nominatim) or tap-on-map; up to 3 photos; Emergency/Standard |
+| Auto-dispatch: radius, fastest route, auto-assign, auto-reassign on timeout | `backend/src/modules/dispatch`: 15 km radius, road travel time (OpenRouteService if keyed, else distance), 60 s offer window, up to 3 rounds, then admin queue |
+| Live location, ETA, status updates (Assigned / On the way / In progress / Completed) | `/jobs/:id` tracking page over Socket.IO; technician GPS heartbeat (or map placement / simulated drive for demos) |
+| Admin: active jobs, technician availability, response time, analytics & reports | `/admin` live map + KPIs + feed, `/admin/jobs`, `/admin/technicians`, `/admin/reports` (charts + CSV export) |
+| Manage workforce | Verify/reject technicians, suspend/reactivate accounts, manual assignment of unanswered jobs, service catalogue |
+| Service history | `/customer/history`, `/technician/jobs`, status log + dispatch log per job |
+| Feedback | 1–5 star rating and comment after completion; feeds technician rating and CSAT |
+| KPIs: response time reduction, utilization, completion rate, CSAT, dispatch accuracy | `GET /api/v1/admin/analytics`, shown on the Reports page with period-over-period comparison |
+| System logs: assignment, acceptance, status changes | `JobOffer` (every offer with distance, ETA, outcome, timings), `JobStatusHistory`, `AvailabilityLog` |
+| Validation, error handling, security | zod on every input, RFC 7807-style errors, helmet CSP, rate limiting, bcrypt, image sniffing on uploads, CSV formula-injection guard |
 
-## Quick Start
+### Pages
+
+Login, Register, Forgot/Reset password, Verify email · **Customer:** Home, Request help, Live
+tracking, Service history · **Technician:** Dashboard (availability, location, live offers,
+skills, 30-day performance), My jobs, Job page with status actions · **Admin:** Live operations,
+Jobs, Technicians, Customers, Reports, Services · **Everyone:** Profile.
+
+## Demo accounts (password `Demo@123` for all)
+
+| Role | Email |
+|------|-------|
+| Customer | customer@demo.sevaswift |
+| Technician (central Delhi, every skill) | tech@demo.sevaswift |
+| Admin | admin@demo.sevaswift |
+
+The seed also creates 20 field technicians in Delhi, Mumbai, Bangalore and Hyderabad, two
+technicians waiting for verification, a dozen customers and 30 days of realistic history (about 220
+requests with offers, status logs, reviews and technician shifts), so every report has data.
+
+### Try the full emergency flow
+
+1. Open the app in two browser profiles (or one normal and one private window): sign in as the
+   **technician** in one and the **customer** in the other.
+2. Technician dashboard: you are already online. Choose **Set on map** and tap somewhere in
+   central Delhi (browsers may block GPS; device GPS is used when allowed).
+3. Customer: **Request help**, pick a service, search "Connaught Place" or tap the map in Delhi,
+   and send. The technician gets a pop-up offer with a 60-second countdown.
+4. Accept, then **Start driving to customer** and **Simulate drive to customer**. The customer's map
+   and ETA update every 2 seconds. Mark Arrived, then In progress, then Completed, and rate the job as the customer.
+5. Decline or ignore an offer to watch it move to the next-nearest technician. After 3 rounds it lands
+   in the admin's **Needs assignment** queue, where an admin can assign it manually.
+6. Sign in as **admin** to watch all of this live on the operations map and in Reports.
+
+## Run locally
+
+Prerequisites: Node.js 20, Docker (for Postgres), npm.
 
 ```bash
-# 1. Clone and enter repo
-git clone <repo-url>
-cd sevaswift
-
-# 2. Start Postgres (also creates the sevaswift_test database for tests)
-docker compose up -d
-
-# 3. Backend setup
-cd backend
-cp .env.example .env
-npm install
-npm run prisma:generate
-npm run prisma:migrate
-npm run prisma:seed
-npm run dev
-
-# 4. Frontend setup (in another terminal)
-cd frontend
-npm install
-npm run dev
+docker compose up -d                       # Postgres + test database
+cd backend && cp .env.example .env && npm install
+npx prisma migrate dev && npm run prisma:seed
+npm run dev                                # API + Socket.IO on :4000
+cd ../frontend && npm install && npm run dev   # web app on :5173 (proxies /api and /socket.io)
 ```
 
-## Demo Accounts (after seeding)
+### Tests
 
-| Role | Email | Password |
-|------|-------|----------|
-| Customer | customer@demo.sevaswift | Demo@123 |
-| Technician | tech@demo.sevaswift | Demo@123 |
-| Admin | admin@demo.sevaswift | Demo@123 |
+```bash
+cd backend && npm test       # 85 integration tests against the sevaswift_test database
+cd frontend && npm test
+```
 
-## API Endpoints
+## Deploy (one service, one URL)
 
-All endpoints under `/api/v1`:
+The API serves the built web app when `FRONTEND_DIST` points at it, so the whole system
+(pages, REST API and WebSockets) runs as a single web service on one origin.
 
-### Auth
-- `POST /api/v1/auth/register` — Register (CUSTOMER, TECHNICIAN; technicians start PENDING admin verification)
-- `POST /api/v1/auth/login` — Login
-- `POST /api/v1/auth/refresh` — Refresh access token
-- `POST /api/v1/auth/verify-email` — Verify email
-- `POST /api/v1/auth/forgot-password` — Request password reset
-- `POST /api/v1/auth/reset-password` — Reset password
+**Render (recommended):** push the repo to GitHub, then in Render choose **New → Blueprint** and
+select the repository. `render.yaml` creates the Postgres database and the web service, generates
+JWT secrets, runs migrations and seeds demo data on start. The service URL is the live link.
 
-### Technicians (role: TECHNICIAN)
-- `GET /api/v1/technicians/me` — Profile, verification status, skills, location
-- `PATCH /api/v1/technicians/me/availability` — Go online/offline (verified only; going offline declines the open offer)
-- `PUT /api/v1/technicians/me/skills` — Set skills (`{ serviceIds: [] }`)
-- `POST /api/v1/technicians/me/location` — GPS heartbeat
-- `GET /api/v1/technicians/me/offers` — Job offers waiting for a response
+**Docker (any host):** `docker build -t sevaswift .` then run with `DATABASE_URL`,
+`JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET` (32+ chars each) and `CORS_ORIGIN`/`APP_URL` set to the public URL.
 
-### Catalog
-- `GET /api/v1/services` — List all services
-- `GET /api/v1/services/:id` — Get service details
-- `POST /api/v1/services` — Create service (admin)
-- `PATCH /api/v1/services/:id` — Update service (admin)
-- `DELETE /api/v1/services/:id` — Delete service (admin)
+### Environment variables
 
-### Jobs
-- `POST /api/v1/jobs` — Raise an emergency request (customer); dispatched immediately
-- `GET /api/v1/jobs` — List jobs (customer: own, technician: assigned, admin: all; `?status=`, `?active=true`)
-- `GET /api/v1/jobs/:id` — Job details, live ETA and status timeline
-- `POST /api/v1/jobs/:id/accept` — Accept an offer (technician; atomic, first accept wins)
-- `POST /api/v1/jobs/:id/reject` — Decline an offer; re-dispatched to the next-best technician
-- `POST /api/v1/jobs/:id/status` — `EN_ROUTE` → `ARRIVED` → `IN_PROGRESS` → `COMPLETED` (technician)
-- `POST /api/v1/jobs/:id/cancel` — Cancel before the technician arrives (customer or admin)
-- `POST /api/v1/jobs/:id/review` — Rate a completed job, once (customer)
-
-### Real-time (Socket.IO, same origin as the API)
-Connect with `io(API_URL, { auth: { token: accessToken } })`; a missing or invalid token fails with
-`connect_error` whose message is the error code (`MISSING_TOKEN`, `TOKEN_EXPIRED`, …).
-
-| Event (server → client) | Sent to | Payload |
-|---|---|---|
-| `offer:new` | the offered technician | `{ jobId, offerId, expiresAt }` |
-| `offer:closed` | that technician | `{ jobId, offerId, reason }` (`ACCEPTED`, `REJECTED`, `EXPIRED`, `CANCELLED`) |
-| `job:status` | customer, assigned technician, admins, `job:{id}` subscribers | `{ jobId, from, to, at }` |
-| `job:location` | `job:{id}` subscribers | `{ jobId, lat, lng, at, eta: { distanceKm, minutes } \| null }` |
-| `technician:location` | admins | `{ technicianId, lat, lng, at }` |
-
-Client → server: `job:subscribe` `{ jobId }` with an ack (`{ ok: true }` or `{ ok: false, code }`; only
-users who can view the job may subscribe) and `job:unsubscribe` `{ jobId }`.
+| Variable | Purpose |
+|---|---|
+| `DATABASE_URL` | PostgreSQL connection string |
+| `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET` | Token signing secrets, 32+ characters |
+| `CORS_ORIGIN` / `APP_URL` | Public URL of the web app (defaults to Render's URL) |
+| `FRONTEND_DIST` | Built web app directory to serve (e.g. `../frontend/dist`) |
+| `DISPATCH_RADIUS_KM`, `OFFER_TIMEOUT_SECONDS`, `MAX_DISPATCH_ROUNDS`, `AVERAGE_SPEED_KMPH` | Dispatch tuning (15 / 60 / 3 / 25) |
+| `ORS_API_KEY` | Optional OpenRouteService key for road travel times |
+| `SMTP_URL`, `MAIL_FROM` | Optional SMTP for verification and reset emails (otherwise links are logged) |
+| `REPORT_TIMEZONE` | Time zone for daily/hourly analytics (default `Asia/Kolkata`) |
 
 ## How auto-dispatch works
 
 1. A customer raises a request with a service, location and priority.
-2. Candidates: technicians who are **verified, online, skilled in that service, not busy**, and within
-   `DISPATCH_RADIUS_KM` (default 15 km) of the job.
+2. Candidates are technicians who are **verified, online, skilled in that service, not on a job and
+   not answering another offer**, within `DISPATCH_RADIUS_KM` of the job.
 3. Up to 10 nearest are sent to OpenRouteService for road travel time (if `ORS_API_KEY` is set;
    otherwise distance ÷ `AVERAGE_SPEED_KMPH`).
 4. The technician with the **fastest arrival** gets the offer (ties: higher rating, then shorter distance).
-5. They have `OFFER_TIMEOUT_SECONDS` (default 60 s) to accept. Reject or timeout → the next-best
-   technician is offered the job, up to `MAX_DISPATCH_ROUNDS` (default 3).
-6. If nobody accepts, the job becomes `EXPIRED` for an admin to assign manually.
+   Offer creation runs under a Postgres advisory lock so nobody holds two offers.
+5. They have `OFFER_TIMEOUT_SECONDS` to accept; acceptance is an atomic compare-and-set (first accept wins).
+   Reject or timeout → next-best technician, up to `MAX_DISPATCH_ROUNDS`.
+6. If nobody accepts, the job becomes **Needs assignment** for an admin. Timers are re-armed from the
+   database after a restart.
 
-Every status change is recorded in `JobStatusHistory` and every offer (with distance, ETA and response)
-in `JobOffer`, which gives the assignment, acceptance and status-change logs the PRD asks for.
+## API
 
-## Project Structure
+All REST endpoints are under `/api/v1`. Errors are `{ status, code, message, fieldErrors? }`.
 
-```
-sevaswift/
-├── backend/
-│   ├── src/
-│   │   ├── index.ts              # App entry point
-│   │   ├── config/               # Configuration
-│   │   ├── common/               # Shared utilities
-│   │   │   ├── errors/           # Error classes
-│   │   │   ├── middleware/       # Express middleware
-│   │   │   ├── prisma.ts         # Prisma client
-│   │   │   └── utils/            # Utilities (clock, etc.)
-│   │   └── modules/              # Feature modules
-│   │       ├── auth/
-│   │       ├── users/
-│   │       ├── technicians/
-│   │       ├── catalog/
-│   │       ├── jobs/
-│   │       ├── dispatch/
-│   │       ├── tracking/
-│   │       ├── notifications/
-│   │       ├── reviews/
-│   │       └── admin/
-│   ├── prisma/
-│   │   ├── schema.prisma         # Database schema
-│   │   └── seed.ts               # Seed script
-│   ├── package.json
-│   └── tsconfig.json
-├── frontend/
-│   ├── src/
-│   │   ├── pages/
-│   │   ├── components/
-│   │   ├── hooks/
-│   │   ├── services/
-│   │   ├── contexts/
-│   │   └── types/
-│   ├── package.json
-│   └── vite.config.ts
-├── docker-compose.yml
-└── README.md
-```
+- **Auth:** `POST /auth/register|login|refresh|logout|verify-email|forgot-password|reset-password`, `GET /auth/me`
+- **Profile:** `GET|PATCH /users/me`, `POST /users/me/password`
+- **Uploads:** `POST /uploads` (multipart `file`, JPEG/PNG/WebP ≤ 5 MB), `GET /uploads/:id`
+- **Catalog:** `GET /services`, `GET /services/:id`; admin `POST|PATCH|DELETE /services/:id`
+- **Jobs:** `POST /jobs`, `GET /jobs?status=&active=`, `GET /jobs/:id`, `POST /jobs/:id/accept|reject|status|cancel|review`
+- **Technician:** `GET /technicians/me`, `PATCH /technicians/me/availability`, `PUT /technicians/me/skills`,
+  `POST /technicians/me/location`, `GET /technicians/me/offers`, `GET /technicians/me/stats`
+- **Admin:** `GET /admin/overview`, `GET /admin/live`, `GET /admin/services`, `GET /admin/technicians`,
+  `PATCH /admin/technicians/:id/verification`, `GET /admin/users`, `PATCH /admin/users/:id/status`,
+  `GET /admin/jobs/:id/candidates`, `POST /admin/jobs/:id/assign`, `GET /admin/analytics?days=`,
+  `GET /admin/reports/jobs.csv?days=`
 
-## Development Commands
+### Real-time (Socket.IO, same origin)
 
-```bash
-# Backend
-cd backend
-npm run dev          # Start dev server with hot reload
-npm run build        # Compile TypeScript
-npm run test         # Run tests
-npm run lint         # Lint code
-npm run format       # Format with Prettier
-npm run prisma:studio # Open Prisma Studio
+Connect with `io({ auth: { token: accessToken } })`.
 
-# Frontend
-cd frontend
-npm run dev          # Start Vite dev server
-npm run build        # Build for production
-npm run test         # Run tests
-npm run lint         # Lint code
-```
+| Event (server → client) | Sent to | Payload |
+|---|---|---|
+| `offer:new` / `offer:closed` | the offered technician | `{ jobId, offerId, expiresAt }` / `{ jobId, offerId, reason }` |
+| `job:status` | customer, assigned technician, admins, `job:{id}` subscribers | `{ jobId, from, to, at }` |
+| `job:location` | `job:{id}` subscribers | `{ jobId, lat, lng, at, eta }` |
+| `technician:location` / `technician:availability` | admins | `{ technicianId, lat, lng, at }` / `{ technicianId, isOnline }` |
 
-## Environment Variables
+Client → server: `job:subscribe { jobId }` (with ack; only users who can view the job) and `job:unsubscribe`.
 
-See `backend/.env.example` for all required variables. Key variables:
+## Docs
 
-| Variable | Description |
-|----------|-------------|
-| DATABASE_URL | PostgreSQL connection string |
-| JWT_ACCESS_SECRET | Access token secret (32+ chars) |
-| JWT_REFRESH_SECRET | Refresh token secret (32+ chars) |
-| CORS_ORIGIN | Frontend URL for CORS |
-| TEST_DATABASE_URL | Database used by `npm test` (defaults to local `sevaswift_test`) |
-
-## Testing
-
-```bash
-# Run all tests
-cd backend && npm test
-cd frontend && npm test
-
-# Backend tests use Jest + Supertest
-# Frontend tests use Vitest + Testing Library
-```
-
-## Deployment (Phase 5)
-
-- Backend → Render
-- PostgreSQL → Neon
-- Frontend → Vercel
-- Image uploads → Cloudinary
-
-## License
-
-MIT
+- Design spec: `docs/superpowers/specs/2026-10-07-dispatch-design.md`
+- Plans: `docs/superpowers/plans/`

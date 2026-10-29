@@ -25,6 +25,14 @@ export interface DomainEvents {
     technicianUserId: string;
     reason: 'ACCEPTED' | 'REJECTED' | 'EXPIRED' | 'CANCELLED';
   };
+  'user.status_changed': {
+    userId: string;
+    status: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED';
+  };
+  'technician.availability': {
+    technicianUserId: string;
+    isOnline: boolean;
+  };
   'technician.location': {
     technicianUserId: string;
     lat: number;

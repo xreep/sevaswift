@@ -12,7 +12,7 @@ import { cancelOfferExpiry, scheduleOfferExpiry } from './scheduler';
 import { estimateTravel } from './travel';
 
 /** Serializes offer creation so one technician never holds two pending offers. */
-const DISPATCH_LOCK_KEY = 7_340_001;
+export const DISPATCH_LOCK_KEY = 7_340_001;
 
 /** At most this many nearest technicians are sent to the routing API per round. */
 const MAX_ROUTED_CANDIDATES = 10;

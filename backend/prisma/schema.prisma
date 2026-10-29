@@ -74,6 +74,7 @@ model User {
   reviews           Review[]
   refreshTokens     RefreshToken[]
   authTokens        AuthToken[]
+  uploads           Upload[]
 
   @@index([email])
   @@index([role])
@@ -95,8 +96,9 @@ model TechnicianProfile {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  skills        TechnicianSkill[]
-  jobOffers     JobOffer[]
+  skills          TechnicianSkill[]
+  jobOffers       JobOffer[]
+  availabilityLog AvailabilityLog[]
 
   @@index([verificationStatus])
   @@index([isOnline])
@@ -237,4 +239,29 @@ model AuthToken {
   createdAt DateTime         @default(now())
 
   @@index([userId])
+}
+
+// Online/offline switches, kept to compute technician utilization (busy time / online time).
+model AvailabilityLog {
+  id           String            @id @default(uuid())
+  technicianId String
+  technician   TechnicianProfile @relation(fields: [technicianId], references: [id], onDelete: Cascade)
+  isOnline     Boolean
+  at           DateTime          @default(now())
+
+  @@index([technicianId, at])
+}
+
+// Issue photos attached to emergency requests. Stored in the database so the
+// app needs no separate object store and survives redeploys on ephemeral disks.
+model Upload {
+  id        String   @id @default(uuid())
+  ownerId   String
+  owner     User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  mimeType  String
+  size      Int
+  data      Bytes
+  createdAt DateTime @default(now())
+
+  @@index([ownerId])
 }

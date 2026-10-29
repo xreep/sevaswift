@@ -5,6 +5,8 @@ import { badRequest, forbidden, notFound } from '../../common/errors/index';
 import { getClock } from '../../common/utils/clock';
 import { rejectOffer } from '../dispatch/dispatch.service';
 import { jobInclude, toJobDto } from '../jobs/jobs.mapper';
+import { ACTIVE_JOB_STATUSES } from '../jobs/lifecycle';
+import { performanceFor } from './performance';
 import type { LocationInput, SkillsInput } from './technicians.dto';
 
 const profileInclude = {
@@ -55,7 +57,15 @@ export async function setAvailability(userId: string, isOnline: boolean) {
     );
   }
 
-  await prisma.technicianProfile.update({ where: { id: profile.id }, data: { isOnline } });
+  if (profile.isOnline !== isOnline) {
+    await prisma.$transaction([
+      prisma.technicianProfile.update({ where: { id: profile.id }, data: { isOnline } }),
+      prisma.availabilityLog.create({
+        data: { technicianId: profile.id, isOnline, at: new Date(getClock().now()) },
+      }),
+    ]);
+    events.publish('technician.availability', { technicianUserId: userId, isOnline });
+  }
 
   if (!isOnline) {
     const open = await prisma.jobOffer.findMany({
@@ -121,4 +131,24 @@ export async function listOffers(userId: string) {
     orderBy: { createdAt: 'asc' },
   });
   return jobs.map(job => toJobDto(job, { id: userId, role: 'TECHNICIAN' }));
+}
+
+/** Lifetime and last-30-day performance plus the job the technician is working on. */
+export async function getStats(userId: string) {
+  const profile = await loadProfile(userId);
+  const ref = [{ profileId: profile.id, userId }];
+  const since30 = new Date(getClock().now() - 30 * 24 * 60 * 60 * 1000);
+  const [lifetime, last30, activeJob] = await Promise.all([
+    performanceFor(ref),
+    performanceFor(ref, since30),
+    prisma.jobRequest.findFirst({
+      where: { technicianId: userId, status: { in: ACTIVE_JOB_STATUSES } },
+      select: { id: true },
+    }),
+  ]);
+  return {
+    lifetime: lifetime.get(userId),
+    last30Days: last30.get(userId),
+    activeJobId: activeJob?.id ?? null,
+  };
 }
