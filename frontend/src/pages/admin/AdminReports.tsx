@@ -36,7 +36,7 @@ function ChartPanel({ title, note, children }: { title: string; note?: string; c
 }
 
 const tooltipStyle = {
-  contentStyle: { border: '1px solid #DCE1E7', borderRadius: 6, fontFamily: 'Barlow', fontSize: 13 },
+  contentStyle: { border: '1px solid #DCE1E7', borderRadius: 6, fontFamily: 'inherit', fontSize: 13 },
   cursor: { fill: 'rgba(23,32,43,0.05)' },
 };
 

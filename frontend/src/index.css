@@ -42,6 +42,7 @@
   h3 {
     margin: 0;
     line-height: 1.15;
+    letter-spacing: -0.02em;
   }
 }
 
@@ -99,7 +100,7 @@
   border: none;
 }
 .leaflet-container {
-  font-family: Barlow, system-ui, sans-serif;
+  font-family: inherit;
   z-index: 0;
 }
 
