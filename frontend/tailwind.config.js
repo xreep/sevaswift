@@ -4,8 +4,10 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['Barlow', 'system-ui', 'sans-serif'],
-        display: ['"Barlow Condensed"', 'Barlow', 'system-ui', 'sans-serif'],
+        // The device's own UI font (San Francisco, Roboto, Segoe UI): nothing to download,
+        // native on every phone. Headings use the same family, set heavier and tighter.
+        sans: ['-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'Roboto', '"Helvetica Neue"', 'Arial', 'sans-serif'],
+        display: ['-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'Roboto', '"Helvetica Neue"', 'Arial', 'sans-serif'],
       },
       colors: {
         ink: { DEFAULT: '#17202B', soft: '#3A4656', muted: '#6B7686' },
@@ -16,7 +18,7 @@ export default {
         alert: { DEFAULT: '#C8322B', soft: '#FBE7E5' },
         route: { DEFAULT: '#2F5DA8', soft: '#E6EEF9' },
       },
-      borderRadius: { panel: '6px' },
+      borderRadius: { panel: '12px' },
     },
   },
   plugins: [],
