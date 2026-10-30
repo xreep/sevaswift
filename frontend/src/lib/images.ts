@@ -12,6 +12,7 @@ const SERVICE_PHOTOS = new Set([
   'geyser',
   'ro_purifier',
   'pest_control',
+  'deep_cleaning',
 ]);
 
 export function servicePhoto(serviceId: string): string | null {
