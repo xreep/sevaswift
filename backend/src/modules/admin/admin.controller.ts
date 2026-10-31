@@ -2,6 +2,7 @@ import type { Response, NextFunction } from 'express';
 import type { AuthRequest } from '../../common/middleware/auth';
 import * as adminService from './admin.service';
 import * as analyticsService from './analytics.service';
+import * as cleanupService from './cleanup.service';
 import { listServices } from '../catalog/catalog.service';
 import type { ListTechniciansQuery, ListUsersQuery } from './admin.dto';
 
@@ -50,6 +51,28 @@ export const setUserStatus = handle(async (req, res) => {
     req.body.status
   );
   res.json({ user });
+});
+
+export const markEmailVerified = handle(async (req, res) => {
+  const user = await adminService.markEmailVerified(req.params.id as string);
+  res.json({ user });
+});
+
+export const deleteUser = handle(async (req, res) => {
+  const user = await cleanupService.deleteUser(req.user!.id, req.params.id as string);
+  res.json({ deleted: user });
+});
+
+export const deleteJob = handle(async (req, res) => {
+  res.json({ deleted: await cleanupService.deleteJob(req.params.id as string) });
+});
+
+export const testDataPreview = handle(async (_req, res) => {
+  res.json({ testData: await cleanupService.testDataPreview() });
+});
+
+export const purgeTestData = handle(async (req, res) => {
+  res.json({ purged: await cleanupService.purgeTestData(req.body.confirmText) });
 });
 
 export const jobCandidates = handle(async (req, res) => {

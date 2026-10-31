@@ -93,12 +93,16 @@ export default function AdminOverview() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Live operations" subtitle="Technicians and open requests update in real time." />
+      <PageHeader title="Live operations" subtitle="Technicians and jobs update in real time." />
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <Stat label="Technicians available" value={overview.technicians.available} hint={`${overview.technicians.online} online`} tone="go" />
         <Stat label="On a job" value={overview.technicians.busy} tone="signal" />
-        <Stat label="Open requests" value={overview.jobs.open} />
+        <Stat
+          label="Active jobs"
+          value={overview.jobs.open}
+          hint="Searching or under way. Unassigned jobs are under Need assignment."
+        />
         <Stat
           label="Need assignment"
           value={overview.jobs.awaitingAssignment}
@@ -183,9 +187,9 @@ export default function AdminOverview() {
           </section>
 
           <section className="panel p-4">
-            <h2 className="font-display text-xl font-semibold">Open requests</h2>
+            <h2 className="font-display text-xl font-semibold">Active jobs</h2>
             {openJobs.length === 0 ? (
-              <p className="mt-2 text-sm text-ink-muted">No open requests right now.</p>
+              <p className="mt-2 text-sm text-ink-muted">No jobs searching or under way right now.</p>
             ) : (
               <ul className="mt-2 max-h-72 divide-y divide-line overflow-y-auto">
                 {openJobs.map(j => (

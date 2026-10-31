@@ -16,7 +16,7 @@ React 18 with Vite and Tailwind, and Leaflet with OpenStreetMap (maps and geocod
 | Secure login for Customer / Technician / Admin, RBAC | JWT access tokens + rotating httpOnly refresh cookie, `requireRole` on every route, role-guarded pages |
 | Profile management | `/profile`: name, phone, password change (signs out other sessions) |
 | Emergency request: category, GPS/manual location, description, photos, priority | `/customer/request`: GPS, address search (Nominatim) or tap-on-map; up to 3 photos; Emergency/Standard |
-| Auto-dispatch: radius, fastest route, auto-assign, auto-reassign on timeout | `backend/src/modules/dispatch`: 15 km radius, road travel time (OpenRouteService if keyed, else distance), 60 s offer window, up to 3 rounds, then admin queue |
+| Auto-dispatch: radius, fastest route, auto-assign, auto-reassign on timeout | `backend/src/modules/dispatch`: searches 15 km first, widening to 25 km and then 40 km (up to 3 offers per step); never auto-offers beyond 40 km; road travel time (OpenRouteService if keyed, else distance), 60 s offer window, up to 3 rounds, then admin queue |
 | Live location, ETA, status updates (Assigned / On the way / In progress / Completed) | `/jobs/:id` tracking page over Socket.IO; technician GPS heartbeat (or map placement / simulated drive for demos) |
 | Admin: active jobs, technician availability, response time, analytics & reports | `/admin` live map + KPIs + feed, `/admin/jobs`, `/admin/technicians`, `/admin/reports` (charts + CSV export) |
 | Manage workforce | Verify/reject technicians, suspend/reactivate accounts, manual assignment of unanswered jobs, service catalogue |

@@ -17,7 +17,7 @@ let customerToken = '';
 
 async function makeUser(key: string, role: Role) {
   const user = await prisma.user.create({
-    data: { name: key, email: `${key}${DOMAIN}`, passwordHash: 'x', role },
+    data: { name: key, email: `${key}${DOMAIN}`, passwordHash: 'x', role, emailVerified: true },
   });
   return {
     user,
@@ -91,6 +91,7 @@ describe('GET /availability', () => {
     // near, far and busy are on duty in range; busy is not free; offline, unskilled, outside excluded.
     expect(res.body.availability).toEqual({
       radiusKm: 15,
+      radiusStepsKm: [15, 25, 40],
       onDuty: 3,
       available: 2,
       nearestKm: 2,

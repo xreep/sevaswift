@@ -4,6 +4,8 @@ import { adminApi, errorMessage } from '../../services/api';
 import { useToast } from '../../contexts/ToastContext';
 import { EmptyState, ErrorNotice, PageHeader, Spinner, Tabs } from '../../components/ui';
 import { formatDateTime } from '../../lib/format';
+import DeleteUserButton from '../../components/admin/DeleteUserButton';
+import TestDataPanel from '../../components/admin/TestDataPanel';
 
 type Tab = 'ACTIVE' | 'SUSPENDED';
 
@@ -34,6 +36,19 @@ export default function AdminUsers() {
     try {
       await adminApi.setUserStatus(u.id, status);
       toast(status === 'SUSPENDED' ? `${u.name} is suspended and signed out.` : `${u.name} is reactivated.`, 'info');
+      load();
+    } catch (err) {
+      toast(errorMessage(err), 'error');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const markVerified = async (u: AdminUser) => {
+    setBusyId(u.id);
+    try {
+      await adminApi.markEmailVerified(u.id);
+      toast(`${u.name}'s email is marked verified.`, 'success');
       load();
     } catch (err) {
       toast(errorMessage(err), 'error');
@@ -73,16 +88,29 @@ export default function AdminUsers() {
                   <td>
                     <p className="font-semibold">{u.name}</p>
                     <p className="text-xs text-ink-muted">{u.email}{!u.emailVerified && ', email not verified'}</p>
+                    {!u.emailVerified && (
+                      <button
+                        className="mt-0.5 text-xs font-semibold text-route hover:underline disabled:opacity-50"
+                        disabled={!!busyId}
+                        onClick={() => markVerified(u)}
+                        title="Use when the verification email cannot be delivered, after checking the address with the customer"
+                      >
+                        Mark email verified
+                      </button>
+                    )}
                   </td>
                   <td>{u.phone ?? '—'}</td>
                   <td className="num">{u.jobCount}</td>
                   <td className="num">{formatDateTime(u.createdAt)}</td>
-                  <td className="text-right">
-                    {u.status === 'SUSPENDED' ? (
-                      <button className="btn-secondary px-3 py-1.5" disabled={!!busyId} onClick={() => setStatus(u, 'ACTIVE')}>Reactivate</button>
-                    ) : (
-                      <button className="btn-danger px-3 py-1.5" disabled={!!busyId} onClick={() => setStatus(u, 'SUSPENDED')}>Suspend</button>
-                    )}
+                  <td>
+                    <div className="flex justify-end gap-2">
+                      {u.status === 'SUSPENDED' ? (
+                        <button className="btn-secondary px-3 py-1.5" disabled={!!busyId} onClick={() => setStatus(u, 'ACTIVE')}>Reactivate</button>
+                      ) : (
+                        <button className="btn-danger px-3 py-1.5" disabled={!!busyId} onClick={() => setStatus(u, 'SUSPENDED')}>Suspend</button>
+                      )}
+                      <DeleteUserButton user={u} disabled={!!busyId} onDeleted={load} />
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -90,6 +118,7 @@ export default function AdminUsers() {
           </table>
         </div>
       )}
+      <TestDataPanel />
     </div>
   );
 }

@@ -9,7 +9,7 @@ import ServiceIcon from '../../components/ServiceIcon';
 
 type Tab = 'OPEN' | 'EXPIRED' | 'COMPLETED' | 'CANCELLED' | 'ALL';
 const TABS: { value: Tab; label: string }[] = [
-  { value: 'OPEN', label: 'Open' },
+  { value: 'OPEN', label: 'Active' },
   { value: 'EXPIRED', label: 'Needs assignment' },
   { value: 'COMPLETED', label: 'Completed' },
   { value: 'CANCELLED', label: 'Cancelled' },
@@ -56,6 +56,12 @@ export default function AdminJobs() {
     <div>
       <PageHeader title="Jobs" subtitle="Every request, its dispatch outcome and timings." />
       <Tabs<Tab> value={tab} onChange={v => setParams({ tab: v })} options={TABS} />
+      {tab === 'OPEN' && (
+        <p className="-mt-2 mb-3 text-sm text-ink-muted">
+          Jobs still searching for a technician or under way. Jobs nobody accepted are under{' '}
+          <Link to="/admin/jobs?tab=EXPIRED" className="font-semibold text-route hover:underline">Needs assignment</Link>.
+        </p>
+      )}
       <div className="mb-4 max-w-sm">
         <label htmlFor="job-search" className="sr-only">Search jobs</label>
         <input id="job-search" className="field" placeholder="Search customer, technician, address" value={q} onChange={e => setQ(e.target.value)} />

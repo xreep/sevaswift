@@ -16,6 +16,8 @@ import type {
   Service,
   TechnicianProfile,
   TechnicianStats,
+  TestData,
+  TestDataPurge,
   Upload,
   User,
 } from '../types';
@@ -102,6 +104,7 @@ export const authApi = {
   login: (data: { email: string; password: string }) =>
     api.post<{ user: User; accessToken: string }>('/auth/login', data),
   logout: () => api.post('/auth/logout'),
+  resendVerification: () => api.post<{ message: string }>('/auth/resend-verification'),
   verifyEmail: (data: { token: string }) => api.post('/auth/verify-email', data),
   forgotPassword: (data: { email: string }) => api.post('/auth/forgot-password', data),
   resetPassword: (data: { token: string; password: string }) =>
@@ -115,6 +118,7 @@ export const usersApi = {
     api.patch<{ user: ProfileUser }>('/users/me', data).then(r => r.data.user),
   changePassword: (data: { currentPassword: string; newPassword: string }) =>
     api.post('/users/me/password', data),
+  deleteAccount: (password: string) => api.delete('/users/me', { data: { password } }),
 };
 
 export const servicesApi = {
@@ -162,8 +166,11 @@ export const jobsApi = {
   get: (id: string) => api.get<{ job: Job }>(`/jobs/${id}`).then(r => r.data.job),
   accept: (id: string) => api.post<{ job: Job }>(`/jobs/${id}/accept`).then(r => r.data.job),
   reject: (id: string) => api.post(`/jobs/${id}/reject`),
-  setStatus: (id: string, status: 'EN_ROUTE' | 'ARRIVED' | 'IN_PROGRESS' | 'COMPLETED') =>
-    api.post<{ job: Job }>(`/jobs/${id}/status`, { status }).then(r => r.data.job),
+  setStatus: (
+    id: string,
+    status: 'EN_ROUTE' | 'ARRIVED' | 'IN_PROGRESS' | 'COMPLETED',
+    confirmFar?: boolean
+  ) => api.post<{ job: Job }>(`/jobs/${id}/status`, { status, confirmFar }).then(r => r.data.job),
   cancel: (id: string, reason?: string) =>
     api.post<{ job: Job }>(`/jobs/${id}/cancel`, { reason }).then(r => r.data.job),
   review: (id: string, data: { rating: number; comment?: string }) =>
@@ -172,6 +179,7 @@ export const jobsApi = {
 
 export interface Availability {
   radiusKm: number | null;
+  radiusStepsKm: number[];
   onDuty: number;
   available: number;
   nearestKm: number | null;
@@ -230,6 +238,18 @@ export const adminApi = {
     api
       .patch<{ user: AdminUser }>(`/admin/users/${id}/status`, { status })
       .then(r => r.data.user),
+  markEmailVerified: (id: string) =>
+    api
+      .patch<{ user: AdminUser }>(`/admin/users/${id}/email-verified`, { emailVerified: true })
+      .then(r => r.data.user),
+  deleteUser: (id: string) => api.delete(`/admin/users/${id}`),
+  deleteJob: (id: string) => api.delete(`/admin/jobs/${id}`),
+  testData: () =>
+    api.get<{ testData: TestData }>('/admin/test-data').then(r => r.data.testData),
+  purgeTestData: (confirmText: string) =>
+    api
+      .post<{ purged: TestDataPurge }>('/admin/test-data/purge', { confirmText })
+      .then(r => r.data.purged),
   candidates: (jobId: string) =>
     api
       .get<{ candidates: Candidate[] }>(`/admin/jobs/${jobId}/candidates`)

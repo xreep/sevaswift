@@ -54,6 +54,23 @@ export async function verifyEmail(req: Request, res: Response, next: NextFunctio
   }
 }
 
+export async function resendVerification(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const sent = await authService.resendVerification(req.user!.id);
+    res.json({
+      message: sent
+        ? 'A new verification link is on its way. Check your inbox.'
+        : 'Your email is already verified.',
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function forgotPassword(
   req: Request,
   res: Response,

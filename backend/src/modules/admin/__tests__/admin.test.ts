@@ -25,7 +25,7 @@ const users: Record<string, { id: string; token: string; profileId?: string }> =
 
 async function makeUser(key: string, role: Role, name = key) {
   const user = await prisma.user.create({
-    data: { name, email: `${key}${DOMAIN}`, passwordHash: 'x', role },
+    data: { name, email: `${key}${DOMAIN}`, passwordHash: 'x', role, emailVerified: true },
   });
   const token = jwt.sign({ sub: user.id, email: user.email, role }, config.jwt.accessSecret);
   users[key] = { id: user.id, token };
@@ -295,7 +295,7 @@ describe('manual assignment', () => {
     expect(blocked.body.code).toBe('TYPED_CONFIRMATION_REQUIRED');
     expect(blocked.body.details.guard.level).toBe('confirm');
     expect(blocked.body.details.guard.distanceKm).toBeGreaterThan(400);
-    expect(blocked.body.details.guard.reasons.join(' ')).toMatch(/beyond the 40 km limit/);
+    expect(blocked.body.details.guard.reasons.join(' ')).toMatch(/beyond 40 km, the furthest auto-dispatch searches/);
   });
 
   it('assigns an expired job once confirmed and records who did it', async () => {

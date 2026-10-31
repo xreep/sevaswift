@@ -10,6 +10,7 @@ router.use(authMiddleware);
 
 router.get('/me', usersController.getMe);
 router.patch('/me', validate(usersDto.updateProfileSchema), usersController.updateMe);
+router.delete('/me', validate(usersDto.deleteAccountSchema), usersController.deleteMe);
 router.post(
   '/me/password',
   validate(usersDto.changePasswordSchema),

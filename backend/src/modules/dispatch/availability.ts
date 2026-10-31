@@ -74,6 +74,8 @@ export async function availability(query: AvailabilityQuery) {
 
   return {
     radiusKm: point ? radiusKm : null,
+    // The search widens through these steps before the admin queue takes over.
+    radiusStepsKm: config.dispatch.radiusStepsKm,
     onDuty: inArea.length,
     available: free.length,
     nearestKm: nearest == null ? null : Math.round(nearest * 10) / 10,

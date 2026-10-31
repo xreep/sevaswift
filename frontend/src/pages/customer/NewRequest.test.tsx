@@ -12,6 +12,9 @@ vi.mock('../../components/map/Map', () => ({
 }));
 vi.mock('react-leaflet', () => ({ Marker: () => null }));
 
+const auth = { user: { role: 'CUSTOMER', email: 'TEST@example.com', emailVerified: true } };
+vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ ...auth, setUser: vi.fn() }) }));
+
 const create = vi.fn();
 vi.mock('../../services/api', () => ({
   servicesApi: {
@@ -23,6 +26,7 @@ vi.mock('../../services/api', () => ({
   },
   jobsApi: { create: (...args: unknown[]) => create(...args) },
   uploadsApi: { image: vi.fn() },
+  authApi: { me: () => new Promise(() => undefined), resendVerification: vi.fn() },
   errorMessage: (_e: unknown, fallback = 'error') => fallback,
 }));
 
@@ -37,7 +41,18 @@ function renderPage(path = '/customer/request') {
 }
 
 describe('NewRequest', () => {
-  beforeEach(() => create.mockReset());
+  beforeEach(() => {
+    create.mockReset();
+    auth.user.emailVerified = true;
+  });
+
+  it('asks an unverified customer to verify their email and keeps the request from being sent', async () => {
+    auth.user.emailVerified = false;
+    renderPage();
+    expect(await screen.findByText('Verify your email to raise requests.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Send a new link' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Send request' })).toBeDisabled();
+  });
 
   it('explains what is missing instead of sending an incomplete request', async () => {
     renderPage();

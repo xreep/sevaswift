@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { AdminTechnician } from '../../types';
 import { adminApi, errorMessage } from '../../services/api';
@@ -10,6 +10,7 @@ import { STALE_MS } from '../../components/LocationLine';
 
 const isStale = (at: string | null) => !at || Date.now() - new Date(at).getTime() > STALE_MS;
 import ServiceIcon from '../../components/ServiceIcon';
+import DeleteUserButton from '../../components/admin/DeleteUserButton';
 
 type Tab = 'PENDING' | 'VERIFIED' | 'REJECTED' | 'ALL';
 
@@ -23,13 +24,18 @@ export default function AdminTechnicians() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [rejecting, setRejecting] = useState<AdminTechnician | null>(null);
   const [reason, setReason] = useState('');
+  // Availability events from the fleet trigger frequent reloads; only the newest may land, so a
+  // response that started before a verification never puts the old count back.
+  const loadSeq = useRef(0);
 
   const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
     try {
       const [rows, pending] = await Promise.all([
         adminApi.technicians({ verification: tab === 'ALL' ? undefined : tab, q: q.trim() || undefined }),
         adminApi.technicians({ verification: 'PENDING' }),
       ]);
+      if (seq !== loadSeq.current) return;
       setList(rows);
       setPendingCount(pending.length);
       setError(null);
@@ -52,10 +58,19 @@ export default function AdminTechnicians() {
 
   const replace = (t: AdminTechnician) => setList(l => (l ? l.map(x => (x.id === t.id ? t : x)) : l));
 
+  /** Takes a decided technician out of the waiting queue straight away, before the reload. */
+  const leaveQueue = (id: string) => {
+    loadSeq.current++;
+    setPendingCount(n => Math.max(0, n - 1));
+    if (tab === 'PENDING') setList(l => (l ? l.filter(x => x.id !== id) : l));
+  };
+
   const verify = async (t: AdminTechnician) => {
     setBusyId(t.id);
     try {
-      replace(await adminApi.setVerification(t.id, 'VERIFIED'));
+      const updated = await adminApi.setVerification(t.id, 'VERIFIED');
+      if (t.verificationStatus === 'PENDING') leaveQueue(t.id);
+      else replace(updated);
       toast(`${t.name} is verified and can go online.`, 'success');
       load();
     } catch (err) {
@@ -74,6 +89,7 @@ export default function AdminTechnicians() {
     setBusyId(rejecting.id);
     try {
       await adminApi.setVerification(rejecting.id, 'REJECTED', reason.trim());
+      if (rejecting.verificationStatus === 'PENDING') leaveQueue(rejecting.id);
       toast(`${rejecting.name} was not approved.`, 'info');
       setRejecting(null);
       setReason('');
@@ -218,6 +234,11 @@ export default function AdminTechnicians() {
                             Suspend
                           </button>
                         ))}
+                      <DeleteUserButton
+                        user={{ ...t, role: 'TECHNICIAN' }}
+                        disabled={!!busyId || !!t.activeJob}
+                        onDeleted={load}
+                      />
                     </div>
                   </td>
                 </tr>

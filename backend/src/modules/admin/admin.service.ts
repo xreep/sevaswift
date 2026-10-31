@@ -310,6 +310,18 @@ export async function listUsers(query: ListUsersQuery, onlyUserId?: string) {
  * Suspends or reactivates an account. Suspension signs the user out everywhere
  * and, for a technician, takes them offline and declines their open offers.
  */
+/**
+ * Marks an email as verified by hand, for deployments without SMTP where the
+ * verification link cannot reach the user.
+ */
+export async function markEmailVerified(userId: string) {
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
+  if (!user) throw notFound('USER_NOT_FOUND', 'User not found');
+  await prisma.user.update({ where: { id: userId }, data: { emailVerified: true } });
+  const [updated] = await listUsers({ limit: 1 }, userId);
+  return updated;
+}
+
 export async function setUserStatus(
   adminId: string,
   userId: string,
@@ -392,10 +404,12 @@ export function assignmentGuard(
 
   if (distanceKm > confirmKm) {
     raise('confirm');
-    reasons.push(`${distanceKm} km away, beyond the ${confirmKm} km limit for emergencies`);
+    reasons.push(
+      `${distanceKm} km away, beyond ${confirmKm} km, the furthest auto-dispatch searches`
+    );
   } else if (distanceKm > warnKm) {
     raise('warn');
-    reasons.push(`${distanceKm} km away, outside the ${warnKm} km emergency radius`);
+    reasons.push(`${distanceKm} km away, outside the ${warnKm} km first search radius`);
   }
   if (etaMinutes > confirmEtaMins) {
     raise('confirm');

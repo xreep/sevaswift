@@ -109,6 +109,21 @@ function appLink(path: string, token: string) {
   return `${config.appUrl.replace(/\/$/, '')}${path}?token=${token}`;
 }
 
+/** Issues a fresh 24-hour verification link and mails it. Returns the raw token for tests. */
+async function sendVerificationEmail(user: { id: string; name: string; email: string }) {
+  const verificationToken = await createAuthToken(
+    user.id,
+    AuthTokenPurpose.EMAIL_VERIFICATION,
+    EMAIL_VERIFICATION_TTL_MS
+  );
+  void sendMail({
+    to: user.email,
+    subject: 'Verify your SevaSwift email',
+    text: `Hi ${user.name},\n\nConfirm your email address by opening this link (valid for 24 hours):\n${appLink('/verify-email', verificationToken)}\n`,
+  });
+  return verificationToken;
+}
+
 export async function register(input: RegisterInput, res: Response) {
   if (input.role === 'ADMIN') {
     throw badRequest('INVALID_ROLE', 'Admin registration not allowed');
@@ -135,16 +150,7 @@ export async function register(input: RegisterInput, res: Response) {
     select: userSelect,
   });
 
-  const verificationToken = await createAuthToken(
-    user.id,
-    AuthTokenPurpose.EMAIL_VERIFICATION,
-    EMAIL_VERIFICATION_TTL_MS
-  );
-  void sendMail({
-    to: user.email,
-    subject: 'Verify your SevaSwift email',
-    text: `Hi ${user.name},\n\nConfirm your email address by opening this link (valid for 24 hours):\n${appLink('/verify-email', verificationToken)}\n`,
-  });
+  await sendVerificationEmail(user);
 
   const accessToken = await issueSession(res, user);
   return { user, accessToken };
@@ -272,6 +278,20 @@ export async function verifyEmail(input: VerifyEmailInput): Promise<void> {
       data: { usedAt: new Date(getClock().now()) },
     }),
   ]);
+}
+
+/** Sends a new verification link to a signed-in user who has not verified yet. */
+export async function resendVerification(userId: string): Promise<string | null> {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) throw notFound('USER_NOT_FOUND', 'User not found');
+  if (user.emailVerified) return null;
+
+  // Older unused links stop working once a new one is sent.
+  await prisma.authToken.updateMany({
+    where: { userId, purpose: AuthTokenPurpose.EMAIL_VERIFICATION, usedAt: null },
+    data: { usedAt: new Date(getClock().now()) },
+  });
+  return sendVerificationEmail(user);
 }
 
 /** Returns the raw reset token (or null for unknown emails) so tests can drive the flow. */

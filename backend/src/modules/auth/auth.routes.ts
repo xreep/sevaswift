@@ -11,6 +11,7 @@ router.post('/login', validate(authDto.loginSchema), authController.login);
 router.post('/refresh', validate(authDto.refreshSchema), authController.refresh);
 router.post('/logout', authController.logout);
 router.post('/verify-email', validate(authDto.verifyEmailSchema), authController.verifyEmail);
+router.post('/resend-verification', authMiddleware, authController.resendVerification);
 router.post(
   '/forgot-password',
   validate(authDto.forgotPasswordSchema),
