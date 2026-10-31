@@ -24,7 +24,7 @@ const users: Record<string, { id: string; token: string }> = {};
 
 async function makeUser(key: string, role: Role) {
   const user = await prisma.user.create({
-    data: { name: key, email: `${key}${DOMAIN}`, passwordHash: 'x', role },
+    data: { name: key, email: `${key}${DOMAIN}`, passwordHash: 'x', role, emailVerified: true },
   });
   const token = jwt.sign({ sub: user.id, email: user.email, role }, config.jwt.accessSecret);
   users[key] = { id: user.id, token };

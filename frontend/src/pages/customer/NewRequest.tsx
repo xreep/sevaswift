@@ -6,6 +6,9 @@ import { availabilityApi, errorMessage, jobsApi, servicesApi, uploadsApi, type A
 import { useToast } from '../../contexts/ToastContext';
 import { BaseMap, ClickToPick, Recenter, homeIcon } from '../../components/map/Map';
 import { ErrorNotice, PageHeader, PageLoader, Spinner } from '../../components/ui';
+import EmailVerifyNotice from '../../components/EmailVerifyNotice';
+import { useAuth } from '../../contexts/AuthContext';
+import { searchSteps } from '../../lib/radius';
 import { DEFAULT_CENTER, currentPosition, reverseGeocode, searchAddress } from '../../lib/geo';
 import { rupees } from '../../lib/format';
 import ServiceIcon from '../../components/ServiceIcon';
@@ -51,6 +54,8 @@ export default function NewRequest() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [coverage, setCoverage] = useState<Availability | null>(null);
+  const { user } = useAuth();
+  const unverified = user?.role === 'CUSTOMER' && !user.emailVerified;
 
   useEffect(() => {
     servicesApi
@@ -179,6 +184,7 @@ export default function NewRequest() {
         title="Request help"
         subtitle="Three quick steps. We start looking for a technician the moment you send it."
       />
+      <EmailVerifyNotice />
 
       <Section step={1} title="What needs fixing?">
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-5" role="radiogroup" aria-label="Service">
@@ -360,7 +366,7 @@ export default function NewRequest() {
       {submitError && <ErrorNotice message={submitError} />}
 
       <div className="sticky bottom-0 -mx-4 border-t border-line bg-paper/95 px-4 py-3 backdrop-blur sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:p-0">
-        <button type="submit" disabled={submitting || uploading} className="btn-signal w-full py-4 text-lg">
+        <button type="submit" disabled={submitting || uploading || unverified} className="btn-signal w-full py-4 text-lg">
           {submitting ? <><Spinner className="h-5 w-5" /> Finding the nearest technician…</> : 'Send request'}
         </button>
       </div>
@@ -388,18 +394,32 @@ function CoverageNote({ coverage }: { coverage: Availability }) {
             {available} technician{available > 1 ? 's' : ''} free within {radiusKm} km.
           </span>{' '}
           The nearest is {nearestKm} km away, roughly {nearestEtaMins} min to reach you.
+          <SearchNote steps={coverage.radiusStepsKm} />
         </p>
       ) : onDuty > 0 ? (
         <p>
-          <span className="font-semibold">Everyone nearby is on a job right now.</span> Send the request anyway and our
-          operations team will assign the first technician who frees up.
+          <span className="font-semibold">Everyone within {radiusKm} km is on a job right now.</span> Send the request
+          anyway and we will keep looking.
+          <SearchNote steps={coverage.radiusStepsKm} />
         </p>
       ) : (
         <p>
-          <span className="font-semibold">No technician with this skill is on duty near this spot.</span> You can still
-          send it and our operations team will assign someone manually.
+          <span className="font-semibold">No technician with this skill is on duty within {radiusKm} km.</span> You can
+          still send it.
+          <SearchNote steps={coverage.radiusStepsKm} />
         </p>
       )}
     </div>
+  );
+}
+
+/** How far the search goes, so nobody reads the first radius as the whole promise. */
+function SearchNote({ steps }: { steps: number[] }) {
+  if (steps.length < 2) return null;
+  return (
+    <span className="mt-1 block text-ink-soft">
+      We ask the nearest first, searching {searchSteps(steps)}. Beyond {steps[steps.length - 1]} km our operations
+      team assigns someone.
+    </span>
   );
 }

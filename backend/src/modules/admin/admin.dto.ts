@@ -38,6 +38,17 @@ export const userStatusSchema = z.object({
   body: z.object({ status: z.enum(['ACTIVE', 'SUSPENDED']) }),
 });
 
+export const emailVerifiedSchema = z.object({
+  params: userIdParams,
+  body: z.object({ emailVerified: z.literal(true) }),
+});
+
+export const userIdSchema = z.object({ params: userIdParams });
+
+export const purgeTestDataSchema = z.object({
+  body: z.object({ confirmText: z.string().max(40) }),
+});
+
 export const jobIdSchema = z.object({ params: z.object({ id: z.string().uuid() }) });
 
 export const assignSchema = z.object({

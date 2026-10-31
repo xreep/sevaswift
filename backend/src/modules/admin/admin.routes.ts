@@ -30,9 +30,24 @@ router.patch(
   adminController.setUserStatus
 );
 
+router.patch(
+  '/users/:id/email-verified',
+  validate(adminDto.emailVerifiedSchema),
+  adminController.markEmailVerified
+);
+router.delete('/users/:id', validate(adminDto.userIdSchema), adminController.deleteUser);
+
+router.delete('/jobs/:id', validate(adminDto.jobIdSchema), adminController.deleteJob);
 router.get('/jobs/:id/candidates', validate(adminDto.jobIdSchema), adminController.jobCandidates);
 router.post('/jobs/:id/assign', validate(adminDto.assignSchema), adminController.assignJob);
 router.post('/jobs/:id/offer', validate(adminDto.assignSchema), adminController.offerJob);
+
+router.get('/test-data', adminController.testDataPreview);
+router.post(
+  '/test-data/purge',
+  validate(adminDto.purgeTestDataSchema),
+  adminController.purgeTestData
+);
 
 router.get('/analytics', validate(adminDto.analyticsSchema), adminController.analytics);
 router.get('/reports/jobs.csv', validate(adminDto.analyticsSchema), adminController.jobsCsv);

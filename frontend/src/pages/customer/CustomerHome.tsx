@@ -8,6 +8,7 @@ import JobCard from '../../components/JobCard';
 import { HERO_PHOTO, servicePhoto } from '../../lib/images';
 import ServiceIcon from '../../components/ServiceIcon';
 import { ErrorNotice, PageLoader } from '../../components/ui';
+import EmailVerifyNotice from '../../components/EmailVerifyNotice';
 import { rupees } from '../../lib/format';
 
 export default function CustomerHome() {
@@ -49,6 +50,7 @@ export default function CustomerHome() {
 
   return (
     <div className="space-y-10">
+      <EmailVerifyNotice />
       <section className="grid items-center gap-6 lg:grid-cols-[1fr_1.1fr] lg:gap-10">
         <div className="order-2 lg:order-1">
           <p className="text-ink-muted">Hello {firstName}</p>

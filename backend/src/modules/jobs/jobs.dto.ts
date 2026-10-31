@@ -44,6 +44,8 @@ export const updateStatusSchema = z.object({
   params: jobIdParams,
   body: z.object({
     status: z.enum(['EN_ROUTE', 'ARRIVED', 'IN_PROGRESS', 'COMPLETED']),
+    // "Arrived" more than 1 km from the customer's pin must be confirmed by the technician.
+    confirmFar: z.boolean().optional(),
   }),
 });
 

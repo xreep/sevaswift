@@ -1,7 +1,8 @@
 import type { JobStatus, Prisma } from '@prisma/client';
 import { OfferStatus } from '@prisma/client';
 import { prisma } from '../../common/prisma';
-import { badRequest, conflict, notFound } from '../../common/errors/index';
+import { AppError, badRequest, conflict, forbidden, notFound } from '../../common/errors/index';
+import { haversineKm } from '../../common/geo/index';
 import { getClock } from '../../common/utils/clock';
 import { cancelOpenOffers, dispatchJob } from '../dispatch/dispatch.service';
 import { assertOwnedUploads } from '../uploads/uploads.service';
@@ -75,7 +76,21 @@ export async function activeJobsWithEta(technicianUserId: string, position: LatL
   return jobs.map(job => ({ jobId: job.id, eta: liveEta(job.status, position, job) }));
 }
 
+/** "Arrived" further than this from the customer's pin needs the technician to confirm. */
+export const ARRIVAL_WARN_KM = 1;
+
 export async function createJob(customerId: string, input: CreateJobInput) {
+  const customer = await prisma.user.findUnique({
+    where: { id: customerId },
+    select: { emailVerified: true },
+  });
+  if (!customer?.emailVerified) {
+    throw forbidden(
+      'EMAIL_NOT_VERIFIED',
+      'Verify your email address before raising a request. Use the link we sent, or resend it from your profile.'
+    );
+  }
+
   const service = await prisma.service.findUnique({ where: { id: input.serviceId } });
   if (!service || !service.isActive) {
     throw badRequest('INVALID_SERVICE', 'Selected service is not available');
@@ -141,13 +156,50 @@ export async function updateStatus(
   }
   assertTransition(job.status, input.status);
 
+  // "Arrived" is checked against the technician's last known position; far away needs a confirm.
+  let note: string | undefined;
+  if (input.status === 'ARRIVED') {
+    const profile = await prisma.technicianProfile.findUnique({
+      where: { userId: technicianUserId },
+      select: { lastLat: true, lastLng: true },
+    });
+    const distanceKm =
+      profile?.lastLat != null && profile.lastLng != null
+        ? Math.round(haversineKm({ lat: profile.lastLat, lng: profile.lastLng }, job) * 100) / 100
+        : null;
+    const far = distanceKm === null || distanceKm > ARRIVAL_WARN_KM;
+    if (far && !input.confirmFar) {
+      throw new AppError(
+        409,
+        'ARRIVAL_CONFIRMATION_REQUIRED',
+        distanceKm === null
+          ? 'Your location is unknown. Confirm you are at the customer to mark arrived.'
+          : `Your location shows ${distanceKm} km from the customer. Confirm you are there to mark arrived.`,
+        undefined,
+        { distanceKm }
+      );
+    }
+    if (far) {
+      note =
+        distanceKm === null
+          ? 'Marked arrived with no known location (technician confirmed)'
+          : `Marked arrived ${distanceKm} km from the customer's pin (technician confirmed)`;
+    }
+  }
+
   const at = now();
   const data: Prisma.JobRequestUncheckedUpdateManyInput = {};
   if (input.status === 'ARRIVED') data.arrivedAt = at;
   if (input.status === 'COMPLETED') data.completedAt = at;
 
   const updated = await prisma.$transaction(async tx => {
-    const moved = await transitionJob(tx, { jobId, from: job.status, to: input.status, data });
+    const moved = await transitionJob(tx, {
+      jobId,
+      from: job.status,
+      to: input.status,
+      data,
+      note,
+    });
     if (!moved)
       throw conflict('JOB_CHANGED', 'The job was updated by someone else, please refresh');
     if (input.status === 'COMPLETED') {

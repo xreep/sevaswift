@@ -48,7 +48,7 @@ export interface ApiError {
   code: string;
   message: string;
   fieldErrors?: Record<string, string[]>;
-  details?: { guard?: AssignmentGuard };
+  details?: { guard?: AssignmentGuard; distanceKm?: number | null };
   instance?: string;
 }
 
@@ -161,6 +161,8 @@ export interface Job {
   dispatchRounds: number;
   dispatch: {
     radiusKm: number;
+    /** Search radii in order (15 -> 25 -> 40 km); beyond the last only an admin assigns. */
+    radiusStepsKm: number[];
     offersMade: number;
     currentOffer: {
       technicianName: string;
@@ -329,4 +331,25 @@ export interface Analytics {
   }[];
   byPriority: { priority: JobPriority; requests: number; avgResponseSecs: number | null }[];
   technicians: (Performance & { id: string; name: string; utilization: number | null })[];
+}
+
+export interface TestData {
+  users: { id: string; name: string; email: string; role: Role; createdAt: string; skipped: boolean }[];
+  jobs: {
+    id: string;
+    status: JobStatus;
+    address: string;
+    description: string | null;
+    createdAt: string;
+    customerName: string;
+    rated: boolean;
+    skipped: boolean;
+  }[];
+}
+
+export interface TestDataPurge {
+  deletedUsers: number;
+  deletedJobs: number;
+  skippedUsers: number;
+  skippedJobs: number;
 }

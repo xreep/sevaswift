@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Marker, Polyline, Popup } from 'react-leaflet';
 import axios from 'axios';
 import type { ApiError, AssignmentGuard, Candidate, DispatchAttempt, Job, Role } from '../types';
-import { adminApi, errorMessage, jobsApi } from '../services/api';
+import { adminApi, errorCode, errorMessage, jobsApi } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useJobRoom, useSocketEvent } from '../contexts/SocketContext';
 import { useOptionalTechnician } from '../contexts/TechnicianContext';
@@ -33,6 +33,7 @@ import {
   timeAgo,
 } from '../lib/format';
 import { directionsUrl } from '../lib/geo';
+import { maxStep, searchSteps } from '../lib/radius';
 import ServiceIcon from '../components/ServiceIcon';
 
 type NextStatus = 'EN_ROUTE' | 'ARRIVED' | 'IN_PROGRESS' | 'COMPLETED';
@@ -141,7 +142,10 @@ export default function JobDetail() {
             {role !== 'CUSTOMER' && <> by {job.customer.name}</>}
           </p>
         </div>
-        <CancelButton job={job} role={role} onDone={setJob} />
+        <div className="flex flex-wrap gap-2">
+          <CancelButton job={job} role={role} onDone={setJob} />
+          {role === 'ADMIN' && <DeleteJobButton job={job} />}
+        </div>
       </header>
 
       <div className="grid gap-5 lg:grid-cols-[1.5fr_1fr]">
@@ -150,7 +154,12 @@ export default function JobDetail() {
             {searching ? (
               <Searching job={job} role={role} />
             ) : job.status === 'EXPIRED' ? (
-              <Unassigned role={role} radiusKm={job.dispatch.radiusKm} asked={job.dispatch.offersMade} />
+              <Unassigned
+                role={role}
+                radiusKm={job.dispatch.radiusKm}
+                steps={job.dispatch.radiusStepsKm}
+                asked={job.dispatch.offersMade}
+              />
             ) : job.status === 'CANCELLED' ? (
               <p className="text-ink-soft">
                 This request was cancelled{job.cancelledAt && <> at {formatTime(job.cancelledAt)}</>}.
@@ -301,6 +310,7 @@ function Searching({ job, role }: { job: Job; role: Role }) {
   const left = offer ? Math.max(0, Math.ceil((new Date(offer.expiresAt).getTime() - now) / 1000)) : 0;
   const waited = Math.max(0, Math.round((now - new Date(job.createdAt).getTime()) / 1000));
   const widened = job.dispatch.widened[job.dispatch.widened.length - 1];
+  const furthest = maxStep(job.dispatch.radiusStepsKm);
 
   return (
     <div className="flex items-start gap-4">
@@ -319,7 +329,8 @@ function Searching({ job, role }: { job: Job; role: Role }) {
         )}
         <p className="mt-2 text-sm text-ink-muted">
           Searching within {job.dispatch.radiusKm} km
-          {widened && <> (widened at {formatTime(widened.at)} because nobody closer was free)</>}.
+          {widened && <> (widened at {formatTime(widened.at)} because nobody closer was free)</>}
+          {job.dispatch.radiusKm < furthest && <>; widens up to {furthest} km if nobody accepts</>}.
           {job.dispatch.offersMade > 0 && <> {job.dispatch.offersMade} {job.dispatch.offersMade === 1 ? 'technician' : 'technicians'} asked so far.</>}{' '}
           Waiting {duration(waited)}.
         </p>
@@ -334,14 +345,27 @@ function Searching({ job, role }: { job: Job; role: Role }) {
           </div>
         )}
         {role === 'ADMIN' && offer && (
-          <p className="mt-2 text-xs text-ink-muted">If they do not answer, the next nearest free technician is asked automatically.</p>
+          <p className="mt-2 text-xs text-ink-muted">
+            If they do not answer in time, the next nearest free technician within {furthest} km is asked. If there is
+            nobody within {furthest} km, the job comes back to the admin queue.
+          </p>
         )}
       </div>
     </div>
   );
 }
 
-function Unassigned({ role, radiusKm, asked }: { role: Role; radiusKm: number; asked: number }) {
+function Unassigned({
+  role,
+  radiusKm,
+  steps,
+  asked,
+}: {
+  role: Role;
+  radiusKm: number;
+  steps: number[];
+  asked: number;
+}) {
   return (
     <div>
       <p className="font-display text-3xl font-semibold text-alert">
@@ -353,8 +377,9 @@ function Unassigned({ role, radiusKm, asked }: { role: Role; radiusKm: number; a
           : 'Everyone nearby is busy right now. Our operations team has been alerted and will assign a technician manually. You can also cancel.'}
       </p>
       <p className="mt-2 text-sm text-ink-muted">
-        We searched up to {radiusKm} km
+        We searched within {searchSteps(steps, radiusKm)}
         {asked > 0 ? ` and asked ${asked} ${asked === 1 ? 'technician' : 'technicians'}` : ''}.
+        {role === 'ADMIN' && ` Auto-dispatch never offers a job beyond ${maxStep(steps)} km.`}
       </p>
     </div>
   );
@@ -470,26 +495,80 @@ function CancelButton({ job, role, onDone }: { job: Job; role: Role; onDone: (j:
   );
 }
 
+const DELETABLE: Job['status'][] = ['COMPLETED', 'CANCELLED', 'EXPIRED'];
+
+function DeleteJobButton({ job }: { job: Job }) {
+  const toast = useToast();
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  if (!DELETABLE.includes(job.status)) return null;
+
+  const confirm = async () => {
+    setBusy(true);
+    try {
+      await adminApi.deleteJob(job.id);
+      toast('Job deleted.', 'info');
+      navigate('/admin/jobs');
+    } catch (err) {
+      toast(errorMessage(err), 'error');
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <button className="btn-secondary" onClick={() => setOpen(true)}>
+        Delete job
+      </button>
+      <Modal open={open} title="Delete this job permanently?" onClose={() => setOpen(false)}>
+        <p className="text-sm text-ink-soft">
+          The request, its status log, dispatch log and any rating are removed for everyone. The technician's
+          completed-job count and rating are recalculated. This cannot be undone.
+        </p>
+        <div className="mt-5 flex justify-end gap-2">
+          <button className="btn-secondary" onClick={() => setOpen(false)}>
+            Keep job
+          </button>
+          <button className="btn-danger" onClick={confirm} disabled={busy}>
+            {busy ? <Spinner className="h-4 w-4" /> : 'Delete job'}
+          </button>
+        </div>
+      </Modal>
+    </>
+  );
+}
+
 function TechnicianActions({ job, onChange }: { job: Job; onChange: (j: Job) => void }) {
   const toast = useToast();
   const tech = useOptionalTechnician();
   const [busy, setBusy] = useState(false);
   const [confirmDone, setConfirmDone] = useState(false);
+  // Set when the server says "arrived" is far from the customer's pin: km, or null if unknown.
+  const [farArrival, setFarArrival] = useState<{ distanceKm: number | null } | null>(null);
   const step = NEXT_STEP[job.status];
   const travelling = job.status === 'ACCEPTED' || job.status === 'EN_ROUTE';
 
-  const advance = async (to: NextStatus) => {
+  const advance = async (to: NextStatus, confirmFar?: boolean) => {
     setBusy(true);
     try {
-      const updated = await jobsApi.setStatus(job.id, to);
+      const updated = await jobsApi.setStatus(job.id, to, confirmFar);
       onChange(updated);
+      setFarArrival(null);
       if (to === 'ARRIVED') tech?.stopDrive();
       if (to === 'COMPLETED') {
         toast('Job completed. You are free for the next one.', 'success');
         tech?.reload();
       }
     } catch (err) {
-      toast(errorMessage(err), 'error');
+      if (errorCode(err) === 'ARRIVAL_CONFIRMATION_REQUIRED') {
+        const details = axios.isAxiosError(err)
+          ? (err.response?.data as ApiError | undefined)?.details
+          : undefined;
+        setFarArrival({ distanceKm: details?.distanceKm ?? null });
+      } else {
+        toast(errorMessage(err), 'error');
+      }
     } finally {
       setBusy(false);
       setConfirmDone(false);
@@ -535,6 +614,27 @@ function TechnicianActions({ job, onChange }: { job: Job; onChange: (j: Job) => 
           </button>
         </div>
       )}
+      <Modal open={!!farArrival} title="Are you at the customer?" onClose={() => setFarArrival(null)}>
+        <p className="text-sm text-ink-soft">
+          {farArrival?.distanceKm != null ? (
+            <>
+              Your last shared location is <span className="num font-semibold text-ink">{farArrival.distanceKm} km</span>{' '}
+              from the customer's pin.
+            </>
+          ) : (
+            'We do not have your current location.'
+          )}{' '}
+          Only mark arrived if you are at the door. If you confirm, the status log will record the distance.
+        </p>
+        <div className="mt-5 flex justify-end gap-2">
+          <button className="btn-secondary" onClick={() => setFarArrival(null)}>
+            Not yet
+          </button>
+          <button className="btn-primary" onClick={() => advance('ARRIVED', true)} disabled={busy}>
+            {busy ? <Spinner className="h-4 w-4" /> : 'I am here, mark arrived'}
+          </button>
+        </div>
+      </Modal>
       <Modal open={confirmDone} title="Mark the job completed?" onClose={() => setConfirmDone(false)}>
         <p className="text-sm text-ink-soft">
           Confirm the issue is fixed and the customer is satisfied. The customer will be asked to rate the service.
@@ -704,6 +804,7 @@ function AssignPanel({ job, onAssigned }: { job: Job; onAssigned: (j: Job) => vo
   const [acknowledged, setAcknowledged] = useState(false);
   const [typed, setTyped] = useState('');
   const [busy, setBusy] = useState(false);
+  const [showFar, setShowFar] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -750,6 +851,10 @@ function AssignPanel({ job, onAssigned }: { job: Job; onAssigned: (j: Job) => vo
   const needsAck = pick && pick.guard.level !== 'ok';
   const needsTyped = pick?.guard.level === 'confirm';
   const ready = pick && (!needsAck || acknowledged) && (!needsTyped || typed.trim().toUpperCase() === 'ASSIGN');
+  // Beyond the hard emergency limits (40 km or 90 min): hidden until asked for, and badged.
+  const within = candidates?.filter(c => c.guard.level !== 'confirm') ?? [];
+  const far = candidates?.filter(c => c.guard.level === 'confirm') ?? [];
+  const rows = showFar ? [...within, ...far] : within;
 
   return (
     <section className="panel p-5">
@@ -770,51 +875,77 @@ function AssignPanel({ job, onAssigned }: { job: Job; onAssigned: (j: Job) => vo
       ) : candidates.length === 0 ? (
         <p className="mt-3 text-sm">No verified technician has this skill yet.</p>
       ) : (
-        <div className="mt-3 overflow-x-auto">
-          <table className="data-table min-w-[620px]">
-            <thead>
-              <tr>
-                <th>Technician</th>
-                <th>Distance and ETA</th>
-                <th>State</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {candidates.map(c => (
-                <tr key={c.id}>
-                  <td>
-                    <p className="font-semibold">{c.name}</p>
-                    <p className="num text-xs text-ink-muted">
-                      {c.location.lat.toFixed(5)}, {c.location.lng.toFixed(5)}
-                    </p>
-                  </td>
-                  <td className="num">
-                    <span className={c.guard.level === 'confirm' ? 'font-semibold text-alert' : c.guard.level === 'warn' ? 'font-semibold text-signal-deep' : ''}>
-                      {c.distanceKm} km, ~{c.etaMinutes} min
-                    </span>
-                    {c.guard.locationAgeMins != null && c.guard.locationAgeMins > 10 && (
-                      <span className="block text-xs text-alert">location {c.guard.locationAgeMins} min old</span>
-                    )}
-                  </td>
-                  <td className="text-xs">
-                    {c.busy ? 'On a job' : c.hasOtherOffer ? 'Answering an offer' : c.isOnline ? 'Online, free' : 'Offline'}
-                  </td>
-                  <td>
-                    <div className="flex justify-end gap-2">
-                      <button className="btn-primary px-3 py-1.5" disabled={!c.offerable || busy} onClick={() => open(c, 'offer')}>
-                        Send offer
-                      </button>
-                      <button className="btn-secondary px-3 py-1.5" disabled={!c.assignable || busy} onClick={() => open(c, 'assign')}>
-                        Assign directly
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <>
+          {within.length === 0 && !showFar && (
+            <p className="mt-3 rounded-panel border border-alert/40 bg-alert-soft px-3 py-2 text-sm">
+              No technician with this skill is within emergency limits (40 km or 90 min). Ask the customer whether they
+              can wait, or cancel the request.
+            </p>
+          )}
+          {rows.length > 0 && (
+            <div className="mt-3 overflow-x-auto">
+              <table className="data-table min-w-[620px]">
+                <thead>
+                  <tr>
+                    <th>Technician</th>
+                    <th>Distance and ETA</th>
+                    <th>State</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map(c => (
+                    <tr key={c.id} className={c.guard.level === 'confirm' ? 'bg-alert-soft/50' : undefined}>
+                      <td>
+                        <p className="font-semibold">{c.name}</p>
+                        {c.guard.level === 'confirm' ? (
+                          <span className="mt-0.5 inline-block rounded bg-alert px-1.5 py-0.5 text-[11px] font-semibold text-white">
+                            Beyond emergency limit
+                          </span>
+                        ) : c.guard.level === 'warn' ? (
+                          <span className="mt-0.5 inline-block rounded bg-signal-soft px-1.5 py-0.5 text-[11px] font-semibold text-signal-deep">
+                            Outside 15 km / 45 min
+                          </span>
+                        ) : null}
+                        <p className="num text-xs text-ink-muted">
+                          {c.location.lat.toFixed(5)}, {c.location.lng.toFixed(5)}
+                        </p>
+                      </td>
+                      <td className="num">
+                        <span className={c.guard.level === 'confirm' ? 'font-semibold text-alert' : c.guard.level === 'warn' ? 'font-semibold text-signal-deep' : ''}>
+                          {c.distanceKm} km, ~{c.etaMinutes} min
+                        </span>
+                        {c.guard.locationAgeMins != null && c.guard.locationAgeMins > 10 && (
+                          <span className="block text-xs text-alert">location {c.guard.locationAgeMins} min old</span>
+                        )}
+                      </td>
+                      <td className="text-xs">
+                        {c.busy ? 'On a job' : c.hasOtherOffer ? 'Answering an offer' : c.isOnline ? 'Online, free' : 'Offline'}
+                      </td>
+                      <td>
+                        <div className="flex justify-end gap-2">
+                          <button className="btn-primary px-3 py-1.5" disabled={!c.offerable || busy} onClick={() => open(c, 'offer')}>
+                            Send offer
+                          </button>
+                          <button className="btn-secondary px-3 py-1.5" disabled={!c.assignable || busy} onClick={() => open(c, 'assign')}>
+                            Assign directly
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {far.length > 0 && (
+            <button className="mt-3 text-sm font-semibold text-route hover:underline" onClick={() => setShowFar(v => !v)}>
+              {showFar
+                ? `Hide the ${far.length} beyond the emergency limit`
+                : `Show ${far.length} ${far.length === 1 ? 'technician' : 'technicians'} beyond the emergency limit (over 40 km or 90 min)`}
+            </button>
+          )}
+        </>
       )}
 
       <Modal

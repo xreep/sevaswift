@@ -115,6 +115,7 @@ export function toJobDto(job: JobWithRelations, viewer: Viewer) {
     // Live search progress: shown to everyone who can see the job.
     dispatch: {
       radiusKm: job.dispatchRadiusKm,
+      radiusStepsKm: config.dispatch.radiusStepsKm,
       offersMade: job.offers.length,
       currentOffer: pendingOffer
         ? {

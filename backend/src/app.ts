@@ -73,6 +73,7 @@ export function createApp() {
       '/api/v1/auth/register',
       '/api/v1/auth/forgot-password',
       '/api/v1/auth/reset-password',
+      '/api/v1/auth/resend-verification',
     ],
     rateLimit({
       windowMs: 15 * 60 * 1000,

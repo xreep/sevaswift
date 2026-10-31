@@ -21,7 +21,9 @@ const minutesAgo = (m: number) => new Date(START - m * 60_000);
 const users: Record<string, { id: string; token: string }> = {};
 
 async function makeUser(key: string, role: Role, email = `${key}${DOMAIN}`) {
-  const user = await prisma.user.create({ data: { name: key, email, passwordHash: 'x', role } });
+  const user = await prisma.user.create({
+    data: { name: key, email, passwordHash: 'x', role, emailVerified: true },
+  });
   users[key] = {
     id: user.id,
     token: jwt.sign({ sub: user.id, email, role }, config.jwt.accessSecret),
@@ -268,7 +270,7 @@ describe('manual offers and the assignment guard', () => {
       .expect(409);
     expect(blocked.body.code).toBe('CONFIRMATION_REQUIRED');
     expect(blocked.body.details.guard).toMatchObject({ level: 'warn' });
-    expect(blocked.body.details.guard.reasons[0]).toMatch(/outside the 15 km emergency radius/);
+    expect(blocked.body.details.guard.reasons[0]).toMatch(/outside the 15 km first search radius/);
 
     await request(app)
       .post(`/api/v1/admin/jobs/${job.id}/offer`)
