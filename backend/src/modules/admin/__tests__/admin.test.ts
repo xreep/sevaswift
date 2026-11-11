@@ -295,7 +295,9 @@ describe('manual assignment', () => {
     expect(blocked.body.code).toBe('TYPED_CONFIRMATION_REQUIRED');
     expect(blocked.body.details.guard.level).toBe('confirm');
     expect(blocked.body.details.guard.distanceKm).toBeGreaterThan(400);
-    expect(blocked.body.details.guard.reasons.join(' ')).toMatch(/beyond 40 km, the furthest auto-dispatch searches/);
+    expect(blocked.body.details.guard.reasons.join(' ')).toMatch(
+      /beyond 40 km, the furthest auto-dispatch searches/
+    );
   });
 
   it('assigns an expired job once confirmed and records who did it', async () => {
